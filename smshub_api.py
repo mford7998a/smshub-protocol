@@ -68,11 +68,6 @@ class SmsHubAPI:
         response = self._make_request('PUSH_SMS', params)
         return response and response.get('status') == 'SUCCESS'
 
-    def get_services(self) -> Dict[str, Dict]:
-        """Get available services and quantities.
-        This is not used by the agent - we respond to GET_SERVICES requests instead."""
-        pass
-
     def get_number(self, country: str, operator: str, service: str, sum_amount: float, 
                   currency: int = 643, exception_phones: List[str] = None) -> Optional[Dict]:
         """Get a number for a service.

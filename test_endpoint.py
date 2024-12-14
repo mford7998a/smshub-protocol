@@ -35,7 +35,10 @@ def test_get_services():
         logger.info(f"Response headers: {dict(response.headers)}")
         logger.info(f"Response content: {response.text}")
         
-        return response.json()
+        response_data = response.json()
+        print("\nGET_SERVICES Response:")
+        print(json.dumps(response_data, indent=2))
+        return response_data
     except Exception as e:
         logger.error(f"Error making request: {e}")
         return None
@@ -77,7 +80,14 @@ def test_get_number():
         logger.info(f"Response headers: {dict(response.headers)}")
         logger.info(f"Response content: {response.text}")
         
-        return response.json()
+        response_data = response.json()
+        print("\nGET_NUMBER Response:")
+        print(json.dumps(response_data, indent=2))
+        
+        # Extract phone number if successful
+        if response_data.get('status') == 'SUCCESS':
+            return response_data.get('phone')
+        return None
     except Exception as e:
         logger.error(f"Error making request: {e}")
         return None
@@ -100,7 +110,7 @@ def test_finish_activation(activation_id: int, status: int = 3):
     data = {
         "action": "FINISH_ACTIVATION",
         "key": "1543IU7eA5e5b5357251243Bb03fbe8f96fa10",
-        "activationId": activation_id,
+        "id": activation_id,
         "status": status
     }
 
@@ -121,7 +131,10 @@ def test_finish_activation(activation_id: int, status: int = 3):
         logger.info(f"Response headers: {dict(response.headers)}")
         logger.info(f"Response content: {response.text}")
         
-        return response.json()
+        response_data = response.json()
+        print("\nFINISH_ACTIVATION Response:")
+        print(json.dumps(response_data, indent=2))
+        return response_data
     except Exception as e:
         logger.error(f"Error making request: {e}")
         return None
@@ -130,28 +143,21 @@ def test_push_sms(phone: str = None, text: str = None):
     """Test PUSH_SMS endpoint.
     This simulates receiving an SMS and forwarding it to SMSHub.
     """
-    url = "https://fzn84ln.localto.net/"  # Local testing server
+    if not phone or not text:
+        phone = "+1234567890"  # Example phone number
+        text = "Test SMS message"
+    
+    url = "https://fzn84ln.localto.net/"
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "SMSHubAgent/1.0",
         "Accept-Encoding": "gzip",
         "localtonet-skip-warning": "true"
     }
-    
-    # If no phone provided, use the last one we got from GET_NUMBER
-    if not phone:
-        phone = "79281234567"  # Example number with country code
-    
-    # If no text provided, use a test message
-    if not text:
-        text = "VK: 123456 - your verification code"
-        
     data = {
         "action": "PUSH_SMS",
-        "key": "1543IU7eA5e5b5357251243Bb03fbe8f96fa10",  # Local testing key
-        "smsId": int(time.time()),  # Use timestamp as SMS ID
+        "key": "1543IU7eA5e5b5357251243Bb03fbe8f96fa10",
         "phone": int(phone.replace("+", "").replace("-", "")),  # Clean number and convert to int
-        "phoneFrom": "VK",  # Example sender name
         "text": text
     }
 
@@ -172,7 +178,10 @@ def test_push_sms(phone: str = None, text: str = None):
         logger.info(f"Response headers: {dict(response.headers)}")
         logger.info(f"Response content: {response.text}")
         
-        return response.json()
+        response_data = response.json()
+        print("\nPUSH_SMS Response:")
+        print(json.dumps(response_data, indent=2))
+        return response_data
     except Exception as e:
         logger.error(f"Error making request: {e}")
         return None
@@ -181,32 +190,19 @@ if __name__ == "__main__":
     # Test GET_SERVICES
     print("\n=== Testing GET_SERVICES ===")
     result = test_get_services()
-    if result:
-        print("\nGET_SERVICES Response:")
-        print(json.dumps(result, indent=2))
-
+    
     # Test GET_NUMBER
     print("\n=== Testing GET_NUMBER ===")
-    result = test_get_number()
-    phone_number = None
-    if result:
-        print("\nGET_NUMBER Response:")
-        print(json.dumps(result, indent=2))
-        phone_number = str(result.get('number'))
-        
-        # If we got a number, test finishing the activation
-        activation_id = result.get('activationId')
-        if activation_id:
-            print("\n=== Testing FINISH_ACTIVATION ===")
-            finish_result = test_finish_activation(activation_id)
-            if finish_result:
-                print("\nFINISH_ACTIVATION Response:")
-                print(json.dumps(finish_result, indent=2))
+    phone_number = test_get_number()
     
-    # Test PUSH_SMS using the number we got
+    # Test PUSH_SMS with the phone number we got
+    print("\n=== Testing PUSH_SMS ===")
     if phone_number:
-        print("\n=== Testing PUSH_SMS ===")
-        sms_result = test_push_sms(phone_number)
-        if sms_result:
-            print("\nPUSH_SMS Response:")
-            print(json.dumps(sms_result, indent=2)) 
+        sms_result = test_push_sms(phone_number, "Test SMS message")
+        
+        # Test FINISH_ACTIVATION with the phone number if we got one
+        print("\n=== Testing FINISH_ACTIVATION ===")
+        if sms_result and sms_result.get('status') == 'SUCCESS':
+            test_finish_activation(phone_number, status=3)  # Mark as successfully sold
+    else:
+        print("No phone number received from GET_NUMBER, skipping PUSH_SMS test")

@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 logger = logging.getLogger(__name__)
 
 # Default API settings
-SMSHUB_API_KEY = "15431U1ea5e5b53572512438b03fbe8f96fa10"  # Remove the U prefix and agent ID
+SMSHUB_API_KEY = "15431U1ea5e5b53572512438b03fbe8f96fa10"  # Keep the full API key including U prefix
 SMSHUB_AGENT_ID = "15431"  # This can be overridden in config.json
 SMSHUB_SERVER_URL = "https://smshub.org/stubs/handler_api.php"  # Default API endpoint
 

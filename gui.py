@@ -28,14 +28,6 @@ class ModemGUI(ttk.Frame):
         self.connected = False
         self.update_queue = queue.Queue()
         
-        # Initialize performance metrics labels
-        self.total_earnings = None
-        self.today_earnings = None
-        self.total_activations = None
-        self.success_rate = None
-        self.active_numbers = None
-        self.avg_response_time = None
-        
         # Create notebook for tabs
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
@@ -195,22 +187,20 @@ class ModemGUI(ttk.Frame):
         
         ttk.Button(scan_frame, text="Apply", command=self.update_scan_interval).pack(side="left", padx=5)
 
-        # Service Statistics Frame with increased height
+        # Service Statistics Frame
         services_frame = ttk.LabelFrame(self.server_tab, text="Service Statistics", padding="5")
-        services_frame.pack(fill="both", expand=True, padx=5, pady=5)  # Changed to fill both and expand
-
-        # Create Treeview for services with more rows visible
-        columns = ('service', 'quantity', 'active', 'completed', 'cancelled', 'refunded')
-        self.services_tree = ttk.Treeview(services_frame, columns=columns, show='headings', height=20)  # Increased height
+        services_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Create Treeview for services
+        columns = ('service', 'quantity', 'active', 'completed')
+        self.services_tree = ttk.Treeview(services_frame, columns=columns, show='headings', height=20)
         
         # Define column headings and widths
         headings = {
-            'service': ('Service Name', 200),  # Increased width
+            'service': ('Service Name', 200),
             'quantity': ('Available Numbers', 120),
             'active': ('Active Rentals', 100),
-            'completed': ('Completed', 100),
-            'cancelled': ('Cancelled', 100),
-            'refunded': ('Refunded', 100)
+            'completed': ('Completed', 100)
         }
         
         for col, (heading, width) in headings.items():
@@ -223,45 +213,6 @@ class ModemGUI(ttk.Frame):
         
         self.services_tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         services_scroll.pack(side="right", fill="y")
-
-        # Performance Metrics Frame
-        metrics_frame = ttk.LabelFrame(self.server_tab, text="Performance Metrics", padding="5")
-        metrics_frame.pack(fill="x", padx=5, pady=5)
-
-        # Create a grid of metrics
-        metrics_grid = ttk.Frame(metrics_frame)
-        metrics_grid.pack(fill="x", padx=5, pady=5)
-
-        # Row 1: Earnings
-        ttk.Label(metrics_grid, text="Total Earnings:").grid(row=0, column=0, padx=5, pady=2, sticky="e")
-        self.total_earnings = ttk.Label(metrics_grid, text="$0.00")
-        self.total_earnings.grid(row=0, column=1, padx=5, pady=2, sticky="w")
-
-        ttk.Label(metrics_grid, text="Today's Earnings:").grid(row=0, column=2, padx=5, pady=2, sticky="e")
-        self.today_earnings = ttk.Label(metrics_grid, text="$0.00")
-        self.today_earnings.grid(row=0, column=3, padx=5, pady=2, sticky="w")
-
-        # Row 2: Activations
-        ttk.Label(metrics_grid, text="Total Activations:").grid(row=1, column=0, padx=5, pady=2, sticky="e")
-        self.total_activations = ttk.Label(metrics_grid, text="0")
-        self.total_activations.grid(row=1, column=1, padx=5, pady=2, sticky="w")
-
-        ttk.Label(metrics_grid, text="Success Rate:").grid(row=1, column=2, padx=5, pady=2, sticky="e")
-        self.success_rate = ttk.Label(metrics_grid, text="0%")
-        self.success_rate.grid(row=1, column=3, padx=5, pady=2, sticky="w")
-
-        # Row 3: Numbers and Response Time
-        ttk.Label(metrics_grid, text="Active Numbers:").grid(row=2, column=0, padx=5, pady=2, sticky="e")
-        self.active_numbers = ttk.Label(metrics_grid, text="0")
-        self.active_numbers.grid(row=2, column=1, padx=5, pady=2, sticky="w")
-
-        ttk.Label(metrics_grid, text="Average Response Time:").grid(row=2, column=2, padx=5, pady=2, sticky="e")
-        self.avg_response_time = ttk.Label(metrics_grid, text="0.0s")
-        self.avg_response_time.grid(row=2, column=3, padx=5, pady=2, sticky="w")
-
-        # Configure grid columns to expand evenly
-        for i in range(4):
-            metrics_grid.columnconfigure(i, weight=1)
 
     def register_selected_modem(self):
         """Register selected modem with SMS Hub."""
@@ -349,40 +300,21 @@ class ModemGUI(ttk.Frame):
     def update_server_status(self):
         """Update the server status information."""
         try:
-            # Update service statistics
-            services = self.server.get_service_quantities()
+            # Get service quantities
+            service_stats = self.server.get_service_quantities()
             
             # Clear existing items
             for item in self.services_tree.get_children():
                 self.services_tree.delete(item)
             
-            # Update services tree
-            for service_name, stats in services.items():
+            # Update service statistics
+            for service, stats in service_stats.items():
                 self.services_tree.insert('', 'end', values=(
-                    service_name,
-                    stats.get('quantity', 0),  # Number of active modems
-                    stats.get('active', 0),    # Active rentals
-                    stats.get('completed', 0),
-                    stats.get('cancelled', 0),
-                    stats.get('refunded', 0)
+                    service,
+                    stats['quantity'],
+                    stats['active'],
+                    stats['completed']
                 ))
-            
-            # Update performance metrics
-            metrics = self.server.get_performance_metrics()
-            if metrics:
-                self.total_earnings.config(text=f"${metrics.get('total_earnings', 0):.2f}")
-                self.today_earnings.config(text=f"${metrics.get('today_earnings', 0):.2f}")
-                self.total_activations.config(text=str(metrics.get('total_activations', 0)))
-                self.success_rate.config(text=f"{metrics.get('success_rate', 0):.1f}%")
-                self.active_numbers.config(text=str(metrics.get('active_numbers', 0)))
-                self.avg_response_time.config(text=f"{metrics.get('avg_response_time', 0):.1f}s")
-            
-            # Update connection status
-            tunnel_url = self.server.get_public_url()
-            if tunnel_url:
-                self.tunnel_url.config(text=tunnel_url, foreground='green')
-            else:
-                self.tunnel_url.config(text="Not connected", foreground='red')
                 
         except Exception as e:
             logger.error(f"Error updating server status: {e}")

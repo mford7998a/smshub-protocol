@@ -82,6 +82,34 @@ class ModemManager:
         description = port.description.upper()
         return any(keyword in description for keyword in diagnostic_keywords)
 
+    def _is_franklin_t9(self, port) -> bool:
+        """
+        Specifically check if a port is a Franklin T9 modem.
+        Franklin T9 modems have specific identifiers:
+        - VID: 05C6 (Qualcomm)
+        - Description contains "Qualcomm HS-USB"
+        - Not a diagnostic port
+        """
+        if not hasattr(port, 'description') or not hasattr(port, 'vid'):
+            return False
+
+        is_qualcomm = (
+            hasattr(port, 'vid') and 
+            port.vid == 0x05C6  # Qualcomm's Vendor ID
+        )
+        
+        has_correct_description = (
+            "Qualcomm HS-USB" in port.description and
+            not self._is_diagnostic_port(port)
+        )
+        
+        if is_qualcomm and has_correct_description:
+            logger.debug(f"Confirmed Franklin T9 modem on port {port.device}")
+            logger.debug(f"VID: {port.vid:04X}, Description: {port.description}")
+            return True
+            
+        return False
+
     def _is_gsm_modem(self, port) -> bool:
         """Check if a port is likely a GSM modem."""
         if not hasattr(port, 'description'):
@@ -90,13 +118,8 @@ class ModemManager:
         description = str(port.description)
         logger.debug(f"Checking port {port.device} - Description: {description}")
 
-        # Check for Franklin T9 modem first (both modem and diagnostic interfaces)
-        if "Qualcomm HS-USB" in description:
-            # Accept modem interface, reject diagnostic
-            if self._is_diagnostic_port(port):
-                logger.debug(f"Skipping diagnostic port: {port.device}")
-                return False
-            logger.debug(f"Found Franklin T9 modem: {port.device}")
+        # Check specifically for Franklin T9 modem first
+        if self._is_franklin_t9(port):
             return True
 
         # Common USB IDs for GSM modems
@@ -157,6 +180,8 @@ class ModemManager:
                 ('AT+CREG?', 0.1),  # Get Network Registration Status
                 ('AT+CNUM', 0.1),  # Get phone number
                 ('AT+COPS?', 0.1),  # Get carrier
+                ('AT+CGMM', 0.1),  # Get model number
+                ('AT+CGMR', 0.1),  # Get firmware version
             ]
             
             responses = {}
@@ -173,11 +198,24 @@ class ModemManager:
             phone = self._parse_at_response(responses['AT+CNUM'], '+CNUM')
             registration_status = self._parse_at_response(responses['AT+CREG?'], '+CREG')
             carrier = self._parse_at_response(responses['AT+COPS?'], '+COPS')
+            model = self._parse_at_response(responses['AT+CGMM'], '+CGMM')
+            firmware = self._parse_at_response(responses['AT+CGMR'], '+CGMR')
             
-            logger.debug(f"Parsed responses - IMSI: {imsi}, ICCID: {iccid}, Phone: {phone}, Reg Status: {registration_status}, Carrier: {carrier}")
+            logger.debug(f"Parsed responses - IMSI: {imsi}, ICCID: {iccid}, Phone: {phone}, " +
+                        f"Reg Status: {registration_status}, Carrier: {carrier}, " +
+                        f"Model: {model}, Firmware: {firmware}")
 
+            # Determine if this is a Franklin T9 modem
+            is_franklin = self._is_franklin_t9(port)
+            
+            # Additional Franklin T9 verification through AT commands
+            if is_franklin:
+                if model and "T9" in model:
+                    logger.info(f"Confirmed Franklin T9 through model number: {model}")
+                else:
+                    logger.warning(f"Port appears to be Franklin T9 but model number doesn't match: {model}")
+            
             # Determine modem status
-            is_franklin = "Qualcomm HS-USB" in port.description and not self._is_diagnostic_port(port)
             if is_franklin:
                 status = 'active'  # Franklin T9 modems are always active
             else:
@@ -193,11 +231,13 @@ class ModemManager:
                     'port': port.device,
                     'imsi': imsi or 'Unknown',
                     'iccid': iccid or 'Unknown',                    
-                    'phone': validated_phone or 'Unknown',  # Use validated phone or Unknown
+                    'phone': validated_phone or 'Unknown',
                     'status': status,
                     'last_seen': time.time(),
                     'manufacturer': port.manufacturer or 'Unknown',
                     'product': port.product or port.description or 'Unknown',
+                    'model': model or 'Unknown',
+                    'firmware': firmware or 'Unknown',
                     'vid': f"{port.vid:04X}" if port.vid else 'Unknown',
                     'pid': f"{port.pid:04X}" if port.pid else 'Unknown',
                     'carrier': carrier or 'Unknown',
