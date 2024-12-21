@@ -1,6 +1,7 @@
 import requests
 import json
 import logging
+import time
 from typing import Dict, List, Optional, Union
 from dataclasses import dataclass
 
@@ -58,18 +59,40 @@ class SmsHubAPI:
             return None
 
     def push_sms(self, sms_id: int, phone: str, phone_from: str, text: str) -> bool:
-        """Send SMS to SMS Hub server."""
-        params = {
-            'smsId': sms_id,
-            'phone': int(phone),  # Must be numeric with country code
-            'phoneFrom': phone_from,
-            'text': text
-        }
-        response = self._make_request('PUSH_SMS', params)
-        return response and response.get('status') == 'SUCCESS'
-
-    def get_number(self, country: str, operator: str, service: str, sum_amount: float, 
-                  currency: int = 643, exception_phones: List[str] = None) -> Optional[Dict]:
-        """Get a number for a service.
-        This is not used by the agent - we respond to GET_NUMBER requests instead."""
-        pass
+        """Send SMS to SMSHUB server."""
+        try:
+            # No cleaning or modification of inputs - use exactly as provided
+            data = {
+                "smsId": sms_id,
+                "phoneFrom": phone_from,
+                "phone": phone,
+                "text": text,
+                "action": "PUSH_SMS",
+                "key": self.config.api_key
+            }
+            
+            logger.info(f"Sending SMS to SMS Hub")
+            logger.info(f"Request data: {json.dumps(data)}")
+            
+            response = requests.post(
+                self.config.api_url,
+                json=data,
+                headers=self.headers,
+                timeout=30,
+                verify=True
+            )
+            
+            logger.info(f"Response status code: {response.status_code}")
+            logger.info(f"Response content: {response.text}")
+            
+            try:
+                result = response.json()
+                if result.get('status') == 'SUCCESS':
+                    return True
+                return False
+            except:
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error in push_sms: {e}")
+            return False

@@ -6,8 +6,8 @@ import time
 import logging
 from smshub_integration import SmsHubIntegration
 from config import SMSHUB_API_KEY, config
+from datetime import datetime
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ModemGUI(ttk.Frame):
@@ -18,6 +18,10 @@ class ModemGUI(ttk.Frame):
         self.root.title("SMS Hub Agent")
         self.root.geometry("1300x900")  # Set a reasonable default size
         
+        # Configure root window to be resizable
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+        
         # Initialize managers
         self.modem_manager = modem_manager
         self.server = server
@@ -27,81 +31,98 @@ class ModemGUI(ttk.Frame):
         self.selected_port = None
         self.connected = False
         self.update_queue = queue.Queue()
+        self.log_queue = queue.Queue()
+        self.message_history = {}  # Store message history for each modem
         
-        # Create notebook for tabs
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
+        # Create main container
+        self.main_container = ttk.Frame(self.root)
+        self.main_container.grid(row=0, column=0, sticky="nsew")
+        self.main_container.grid_rowconfigure(0, weight=1)
+        self.main_container.grid_columnconfigure(0, weight=1)
+        
+        # Create notebook
+        self.notebook = ttk.Notebook(self.main_container)
+        self.notebook.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         
         # Create tabs
         self.device_tab = ttk.Frame(self.notebook)
         self.server_tab = ttk.Frame(self.notebook)
+        self.messages_tab = ttk.Frame(self.notebook)
+        self.console_tab = ttk.Frame(self.notebook)  # New console tab
+        
+        # Configure tab frames to be resizable
+        for tab in (self.device_tab, self.server_tab, self.messages_tab, self.console_tab):
+            tab.grid_rowconfigure(0, weight=1)
+            tab.grid_columnconfigure(0, weight=1)
         
         self.notebook.add(self.device_tab, text="Device Management")
         self.notebook.add(self.server_tab, text="SMS Hub Dashboard")
+        self.notebook.add(self.messages_tab, text="Message History")
+        self.notebook.add(self.console_tab, text="Console Output")
         
         # Create tab contents
         self.create_device_tab()
         self.create_server_tab()
+        self.create_messages_tab()
+        self.create_console_tab()  # New method for console tab
         
         # Start update thread
         self.start_update_thread()
-
-    def create_widgets(self):
-        # Create main container with notebook for tabs
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # Create tabs
-        self.devices_tab = ttk.Frame(self.notebook)
-        self.server_tab = ttk.Frame(self.notebook)
         
-        self.notebook.add(self.devices_tab, text="Devices")
-        self.notebook.add(self.server_tab, text="Server Status")
-
-        # Create widgets for each tab
-        self.create_devices_tab()
-        self.create_server_tab()
-
-        # Create tunnel status frame at the bottom of the main window
-        self.tunnel_frame = ttk.LabelFrame(self, text="Tunnel Status")
-        self.tunnel_frame.pack(fill='x', padx=5, pady=5)
-
-        self.tunnel_status_label = ttk.Label(self.tunnel_frame, text="LocalToNet Status:")
-        self.tunnel_status_label.pack(side='left', padx=5)
-
-        self.tunnel_url_label = ttk.Label(self.tunnel_frame, text="Not Connected")
-        self.tunnel_url_label.pack(side='left', padx=5)
+        # Start console logging
+        self.setup_console_logging()
 
     def create_device_tab(self):
         """Create the device management tab."""
-        # Device List Frame
+        # Device List Frame with proper weights
         list_frame = ttk.LabelFrame(self.device_tab, text="Connected Devices", padding="5")
-        list_frame.pack(fill="x", padx=5, pady=5)
+        list_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        list_frame.grid_rowconfigure(0, weight=1)  # Make the tree expand vertically
+        list_frame.grid_columnconfigure(0, weight=1)  # Make the tree expand horizontally
         
-        # Create Treeview for devices
-        columns = ('status', 'com_port', 'imei', 'phone', 'signal', 'modem_status')
-        self.device_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=5)
+        # Create Treeview for devices with scrollbars
+        tree_frame = ttk.Frame(list_frame)
+        tree_frame.grid(row=0, column=0, sticky="nsew")
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+        
+        # Create Treeview without fixed height
+        columns = ('status', 'com_port', 'imei', 'iccid', 'phone', 'carrier', 'signal', 'sim_ok', 'network_ok', 'phone_ok')
+        self.device_tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
+        
+        # Add scrollbars
+        y_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.device_tree.yview)
+        x_scrollbar = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.device_tree.xview)
+        self.device_tree.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
+        
+        # Grid layout for treeview and scrollbars
+        self.device_tree.grid(row=0, column=0, sticky="nsew")
+        y_scrollbar.grid(row=0, column=1, sticky="ns")
+        x_scrollbar.grid(row=1, column=0, sticky="ew")
         
         # Define column headings and widths
         headings = {
-            'status': ('Status', 100),
+            'status': ('Status', 150),
             'com_port': ('COM Port', 100),
             'imei': ('IMEI', 150),
-            'phone': ('Phone Number', 150),
-            'signal': ('Signal', 100),
-            'modem_status': ('Modem Status', 150)
+            'iccid': ('ICC ID', 150),
+            'phone': ('Phone Number', 120),
+            'carrier': ('Carrier', 150),
+            'signal': ('Signal', 80),
+            'sim_ok': ('SIM', 50),
+            'network_ok': ('Network', 70),
+            'phone_ok': ('Phone', 60)
         }
         
         for col, (heading, width) in headings.items():
             self.device_tree.heading(col, text=heading)
             self.device_tree.column(col, width=width, anchor='center')
         
-        self.device_tree.pack(fill="x", padx=5, pady=5)
         self.device_tree.bind('<<TreeviewSelect>>', self.on_select)
         
         # Control Frame
         control_frame = ttk.Frame(self.device_tab)
-        control_frame.pack(fill="x", padx=5, pady=5)
+        control_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
         
         # Status Label
         self.selected_label = ttk.Label(control_frame, text="No device selected")
@@ -112,33 +133,93 @@ class ModemGUI(ttk.Frame):
         self.connect_button.pack(side="right", padx=5)
         
         ttk.Button(control_frame, text="Scan", command=self.scan_devices).pack(side="right", padx=5)
+
+    def create_console_tab(self):
+        """Create the console output tab."""
+        # Create main frame
+        console_frame = ttk.Frame(self.console_tab)
+        console_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        console_frame.grid_rowconfigure(0, weight=1)
+        console_frame.grid_columnconfigure(0, weight=1)
         
-        # Messages Frame
-        msg_frame = ttk.LabelFrame(self.device_tab, text="Device Messages", padding="5")
-        msg_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        # Create Text widget
+        self.console_text = scrolledtext.ScrolledText(console_frame, wrap=tk.WORD)
+        self.console_text.grid(row=0, column=0, sticky="nsew")
+        self.console_text.configure(state='disabled')
         
-        # Create Treeview for messages
-        columns = ('timestamp', 'sender', 'message', 'status')
-        self.msg_tree = ttk.Treeview(msg_frame, columns=columns, show='headings', height=10)
+        # Create button frame
+        button_frame = ttk.Frame(console_frame)
+        button_frame.grid(row=1, column=0, sticky="ew", pady=5)
         
-        # Define column headings and widths
-        headings = {
-            'timestamp': ('Time', 150),
-            'sender': ('Sender', 150),
-            'message': ('Message', 400),
-            'status': ('Status', 100)
+        # Add clear button
+        ttk.Button(button_frame, text="Clear Console", 
+                  command=self.clear_console).pack(side="right", padx=5)
+        
+        # Add auto-scroll checkbox
+        self.auto_scroll = tk.BooleanVar(value=True)
+        ttk.Checkbutton(button_frame, text="Auto-scroll", 
+                       variable=self.auto_scroll).pack(side="right", padx=5)
+
+    def clear_console(self):
+        """Clear the console output."""
+        self.console_text.configure(state='normal')
+        self.console_text.delete(1.0, tk.END)
+        self.console_text.configure(state='disabled')
+
+    def setup_console_logging(self):
+        """Setup logging to console widget."""
+        class QueueHandler(logging.Handler):
+            def __init__(self, queue):
+                super().__init__()
+                self.queue = queue
+
+            def emit(self, record):
+                self.queue.put(record)
+
+        # Create queue handler and set formatter
+        queue_handler = QueueHandler(self.log_queue)
+        queue_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        
+        # Add handler to root logger
+        logging.getLogger().addHandler(queue_handler)
+        
+        # Start checking queue
+        self.check_log_queue()
+
+    def check_log_queue(self):
+        """Check for new log records."""
+        while True:
+            try:
+                record = self.log_queue.get_nowait()
+                self.update_console(record)
+            except queue.Empty:
+                break
+        self.root.after(100, self.check_log_queue)
+
+    def update_console(self, record):
+        """Update console with new log record."""
+        msg = self.format_log_message(record)
+        self.console_text.configure(state='normal')
+        self.console_text.insert(tk.END, msg + '\n')
+        if self.auto_scroll.get():
+            self.console_text.see(tk.END)
+        self.console_text.configure(state='disabled')
+
+    def format_log_message(self, record):
+        """Format log record for display."""
+        # Color codes for different log levels
+        colors = {
+            'ERROR': '#FF0000',
+            'WARNING': '#FFA500',
+            'INFO': '#000000',
+            'DEBUG': '#808080'
         }
         
-        for col, (heading, width) in headings.items():
-            self.msg_tree.heading(col, text=heading)
-            self.msg_tree.column(col, width=width, anchor='w' if col == 'message' else 'center')
+        # Format timestamp
+        timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S')
         
-        # Add scrollbar
-        scrollbar = ttk.Scrollbar(msg_frame, orient="vertical", command=self.msg_tree.yview)
-        self.msg_tree.configure(yscrollcommand=scrollbar.set)
-        
-        self.msg_tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        # Format message based on level
+        return f"[{timestamp}] {record.levelname}: {record.getMessage()}"
 
     def create_server_tab(self):
         """Create the SMS Hub server configuration tab."""
@@ -213,166 +294,6 @@ class ModemGUI(ttk.Frame):
         
         self.services_tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         services_scroll.pack(side="right", fill="y")
-
-    def register_selected_modem(self):
-        """Register selected modem with SMS Hub."""
-        if not self.selected_port:
-            self.selected_label.config(text="Please select a device first")
-            return
-
-        # Get device info
-        for item in self.device_tree.get_children():
-            values = self.device_tree.item(item)['values']
-            if values[1] == self.selected_port:  # Check COM port
-                phone_number = values[3]  # Phone number is at index 3
-                if phone_number and phone_number != 'N/A':
-                    # Register with SMS Hub integration
-                    if self.smshub.register_modem(self.selected_port, phone_number):
-                        # Register with server
-                        if self.server.register_modem(phone_number):
-                            self.selected_label.config(text=f"Registered {self.selected_port} with SMS Hub")
-                            self.update_device_info()
-                        else:
-                            self.selected_label.config(text=f"Failed to register {self.selected_port} with server")
-                    else:
-                        self.selected_label.config(text=f"Failed to register {self.selected_port} with SMS Hub")
-                else:
-                    self.selected_label.config(text="No phone number available")
-                break
-
-    def update_device_info(self):
-        """Update the device information display."""
-        try:
-            # Clear existing items
-            for item in self.device_tree.get_children():
-                self.device_tree.delete(item)
-            
-            # Get current modem info
-            modems = self.modem_manager.get_modems()
-            
-            # Update connection state based on active modems
-            any_active = any(modem.get('status') == 'active' for modem in modems.values())
-            self.connected = any_active
-            self.connect_button.config(text="Disconnect All" if any_active else "Connect All")
-            
-            for port, modem in modems.items():
-                # Get modem status
-                status = modem.get('status', 'unknown')
-                status_color = 'green' if status == 'active' else 'red'
-                
-                # Format phone number
-                phone = modem.get('phone', 'Unknown')
-                if phone == 'Unknown':
-                    phone_display = 'Not Available'
-                else:
-                    phone_display = phone
-                
-                # Get modem status display
-                modem_status = "Active" if status == 'active' else "Inactive"
-                
-                # Insert into tree with colored status
-                item_id = self.device_tree.insert('', 'end', values=(
-                    status,
-                    port,
-                    modem.get('imsi', 'Unknown'),
-                    phone_display,
-                    modem.get('signal', 'Unknown'),
-                    modem_status
-                ), tags=(status_color,))
-                
-                # If this was the selected device, reselect it
-                if port == self.selected_port:
-                    self.device_tree.selection_set(item_id)
-                    self.device_tree.see(item_id)
-            
-            # Configure tag colors
-            self.device_tree.tag_configure('green', foreground='green')
-            self.device_tree.tag_configure('red', foreground='red')
-            
-            # Update messages if needed
-            if self.selected_port:
-                self.refresh_messages()
-                
-        except Exception as e:
-            logger.error(f"Error updating device info: {e}")
-            self.selected_label.config(text=f"Error updating device info: {e}")
-
-    def update_server_status(self):
-        """Update the server status information."""
-        try:
-            # Get service quantities
-            service_stats = self.server.get_service_quantities()
-            
-            # Clear existing items
-            for item in self.services_tree.get_children():
-                self.services_tree.delete(item)
-            
-            # Update service statistics
-            for service, stats in service_stats.items():
-                self.services_tree.insert('', 'end', values=(
-                    service,
-                    stats['quantity'],
-                    stats['active'],
-                    stats['completed']
-                ))
-                
-        except Exception as e:
-            logger.error(f"Error updating server status: {e}")
-
-    def process_new_message(self, modem_id: str, message: dict):
-        """Process a new message and update the display."""
-        # Update local display
-        self.refresh_messages()
-        
-        # Get phone number for the modem
-        phone_number = None
-        for item in self.device_tree.get_children():
-            values = self.device_tree.item(item)['values']
-            if values[1] == modem_id:  # COM port
-                phone_number = values[3]  # Phone number
-                break
-        
-        if phone_number and phone_number != 'Not Available':
-            # Add message to server queue
-            self.server.add_message(phone_number, message)
-        
-        # Update device info to reflect any changes
-        self.update_device_info()
-
-    def start_update_thread(self):
-        def update_loop():
-            while True:
-                try:
-                    # Update device info and server status
-                    self.update_queue.put(self.update_device_info)
-                    self.update_queue.put(self.update_server_status)
-                    
-                    # Use the main scan interval setting
-                    time.sleep(config.get('scan_interval', 10))
-                except Exception as e:
-                    logger.error(f"Error in update loop: {e}")
-
-        def check_queue():
-            try:
-                while True:
-                    callback = self.update_queue.get_nowait()
-                    callback()
-            except queue.Empty:
-                pass
-            finally:
-                self.root.after(1000, check_queue)
-
-        update_thread = threading.Thread(target=update_loop, daemon=True)
-        update_thread.start()
-        self.root.after(1000, check_queue)
-
-    def run(self):
-        """Start the GUI application."""
-        # Initial device scan
-        self.scan_devices()
-        
-        # Start the main event loop
-        self.root.mainloop()
 
     def on_select(self, event):
         """Handle device selection."""
@@ -450,11 +371,8 @@ class ModemGUI(ttk.Frame):
     def scan_devices(self):
         """Scan for new devices."""
         try:
-            new_ports = self.modem_manager.find_franklin_t9_devices()
-            if new_ports:
-                self.selected_label.config(text=f"Found Franklin T9 devices: {', '.join(new_ports)}")
-            else:
-                self.selected_label.config(text="No Franklin T9 devices found")
+            self.modem_manager._scan_modems()
+            self.selected_label.config(text="Device scan complete")
             self.update_device_info()
         except Exception as e:
             logger.error(f"Error scanning devices: {e}")
@@ -508,3 +426,384 @@ class ModemGUI(ttk.Frame):
             messagebox.showinfo("Success", "Scan interval updated. Will take effect on next scan.")
         except ValueError:
             messagebox.showerror("Error", "Please enter a valid number of seconds.")
+
+    def _create_connected_devices_frame(self):
+        """Create frame for connected devices."""
+        frame = ttk.LabelFrame(self.root, text="Connected Devices", padding="5 5 5 5")
+        frame.grid(row=1, column=0, columnspan=4, sticky="nsew", padx=5, pady=5)
+
+        # Create Treeview
+        self.devices_tree = ttk.Treeview(frame, columns=(
+            "port", "status", "iccid", "network", "phone", "carrier", 
+            "signal", "type", "last_seen"
+        ), show="headings", height=10)
+
+        # Define column headings and widths
+        columns = [
+            ("port", "Port", 100),
+            ("status", "Status", 80),
+            ("iccid", "ICCID", 80),
+            ("network", "Network", 100),
+            ("phone", "Phone", 120),
+            ("carrier", "Carrier", 100),
+            ("signal", "Signal", 60),
+            ("type", "Type", 100),
+            ("last_seen", "Last Seen", 150)
+        ]
+
+        for col_id, heading, width in columns:
+            self.devices_tree.heading(col_id, text=heading)
+            self.devices_tree.column(col_id, width=width)
+
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.devices_tree.yview)
+        self.devices_tree.configure(yscrollcommand=scrollbar.set)
+
+        # Grid layout
+        self.devices_tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        # Configure grid weights
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(0, weight=1)
+
+        return frame
+
+    def update_devices(self, devices):
+        """Update connected devices display."""
+        # Clear existing items
+        for item in self.devices_tree.get_children():
+            self.devices_tree.delete(item)
+
+        # Sort devices by status (active first)
+        sorted_devices = sorted(
+            devices.items(),
+            key=lambda x: (x[1]['status'] != 'active', x[0])
+        )
+
+        # Add devices to treeview
+        for port, info in sorted_devices:
+            # Format status with requirements
+            status = info['status']
+            if status != 'active':
+                missing = []
+                if info.get('iccid') in [None, 'Unknown']:
+                    missing.append('SIM')
+                if info.get('network_status') not in ['registered', 'roaming']:
+                    missing.append('Network')
+                if info.get('phone') in [None, 'Unknown']:
+                    missing.append('Phone')
+                if missing:
+                    status += f" ({', '.join(missing)})"
+
+            # Format signal quality
+            signal = info.get('signal_quality', 'Unknown')
+            if signal != 'Unknown':
+                signal = f"{signal}%"
+
+            # Format carrier name
+            carrier = info.get('carrier', 'Unknown')
+            if carrier == '0':
+                carrier = 'Unknown'
+            elif carrier.lower() == 'home':
+                network_status = info.get('network_status', '')
+                carrier = f"Home ({network_status})"
+
+            # Format last seen
+            last_seen = datetime.fromtimestamp(info['last_seen']).strftime('%Y-%m-%d %H:%M:%S')
+
+            self.devices_tree.insert("", "end", values=(
+                port,
+                status,
+                "✓" if info.get('iccid') not in [None, 'Unknown'] else "✗",
+                info.get('network_status', 'Unknown'),
+                info.get('phone', 'Unknown'),
+                carrier,
+                signal,
+                info.get('type', 'Unknown'),
+                last_seen
+            ))
+
+        # Update status counts
+        total = len(devices)
+        active = sum(1 for d in devices.values() if d['status'] == 'active')
+        self.status_var.set(f"Active: {active}/{total}")
+
+    def start_update_thread(self):
+        """Start the update thread for periodic updates."""
+        def update_loop():
+            while True:
+                try:
+                    # Update device info and server status
+                    self.update_queue.put(self.update_device_info)
+                    self.update_queue.put(self.update_server_status)
+                    
+                    # Use the main scan interval setting
+                    time.sleep(config.get('scan_interval', 10))
+                except Exception as e:
+                    logger.error(f"Error in update loop: {e}")
+
+        def check_queue():
+            try:
+                while True:
+                    callback = self.update_queue.get_nowait()
+                    callback()
+            except queue.Empty:
+                pass
+            finally:
+                self.root.after(1000, check_queue)
+
+        update_thread = threading.Thread(target=update_loop, daemon=True)
+        update_thread.start()
+        self.root.after(1000, check_queue)
+
+    def update_device_info(self):
+        """Update the device information display."""
+        try:
+            # Clear existing items
+            for item in self.device_tree.get_children():
+                self.device_tree.delete(item)
+            
+            # Get current modem info directly from modems dictionary
+            modems = self.modem_manager.modems
+            
+            # Update connection state based on active modems
+            any_active = any(modem.get('status') == 'active' for modem in modems.values())
+            self.connected = any_active
+            self.connect_button.config(text="Disconnect All" if any_active else "Connect All")
+            
+            for port, modem in modems.items():
+                # Get modem status and requirements
+                status = modem.get('status', 'unknown')
+                iccid_ok = modem.get('iccid') not in [None, 'Unknown']
+                network_ok = modem.get('network_status') in ['registered', 'roaming']
+                phone_ok = modem.get('phone') not in [None, 'Unknown']
+                
+                # Build status display
+                status_display = status
+                if status != 'active':
+                    missing = []
+                    if not iccid_ok:
+                        missing.append('SIM')
+                    if not network_ok:
+                        missing.append('Network')
+                    if not phone_ok:
+                        missing.append('Phone')
+                    if missing:
+                        status_display += f" (Missing: {', '.join(missing)})"
+                
+                # Format phone number
+                phone = modem.get('phone', 'Unknown')
+                if phone == 'Unknown':
+                    phone_display = 'Not Available'
+                else:
+                    phone_display = phone
+                
+                # Get carrier info
+                carrier = modem.get('carrier', 'Unknown')
+                network_status = modem.get('network_status', 'Unknown')
+                if carrier == '0':
+                    carrier_display = 'Unknown'
+                elif carrier.lower() == 'home':
+                    carrier_display = f"Home ({network_status})"
+                else:
+                    carrier_display = f"{carrier} ({network_status})"
+                
+                # Format signal quality
+                signal = modem.get('signal_quality', 'Unknown')
+                if signal != 'Unknown':
+                    signal_display = f"{signal}%"
+                else:
+                    signal_display = 'Unknown'
+                
+                # Insert into tree with colored status
+                status_color = 'green' if status == 'active' else 'red'
+                item_id = self.device_tree.insert('', 'end', values=(
+                    status_display,
+                    port,
+                    modem.get('imei', 'Unknown'),
+                    modem.get('iccid', 'Unknown'),
+                    phone_display,
+                    carrier_display,
+                    signal_display,
+                    "✓" if iccid_ok else "✗",
+                    "✓" if network_ok else "✗",
+                    "✓" if phone_ok else "✗"
+                ), tags=(status_color,))
+                
+                # If this was the selected device, reselect it
+                if port == self.selected_port:
+                    self.device_tree.selection_set(item_id)
+                    self.device_tree.see(item_id)
+            
+            # Configure tag colors
+            self.device_tree.tag_configure('green', foreground='green')
+            self.device_tree.tag_configure('red', foreground='red')
+                
+        except Exception as e:
+            logger.error(f"Error updating device info: {e}")
+            self.selected_label.config(text=f"Error updating device info: {e}")
+
+    def update_server_status(self):
+        """Update the server status information."""
+        try:
+            # Get service quantities
+            service_stats = self.server.get_service_quantities()
+            
+            # Clear existing items
+            for item in self.services_tree.get_children():
+                self.services_tree.delete(item)
+            
+            # Update service statistics
+            for service, stats in service_stats.items():
+                self.services_tree.insert('', 'end', values=(
+                    service,
+                    stats['quantity'],
+                    stats['active'],
+                    stats['completed']
+                ))
+                
+        except Exception as e:
+            logger.error(f"Error updating server status: {e}")
+
+    def create_messages_tab(self):
+        """Create the message history tab."""
+        # Create top frame for controls
+        control_frame = ttk.Frame(self.messages_tab)
+        control_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        
+        # Add modem selection dropdown
+        ttk.Label(control_frame, text="Select Modem:").pack(side="left", padx=5)
+        self.modem_var = tk.StringVar()
+        self.modem_dropdown = ttk.Combobox(control_frame, textvariable=self.modem_var, state="readonly")
+        self.modem_dropdown.pack(side="left", padx=5)
+        
+        # Add refresh button
+        ttk.Button(control_frame, text="Refresh", command=self.refresh_message_history).pack(side="right", padx=5)
+        
+        # Create message history frame
+        history_frame = ttk.Frame(self.messages_tab)
+        history_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        history_frame.grid_rowconfigure(0, weight=1)
+        history_frame.grid_columnconfigure(0, weight=1)
+        
+        # Create Treeview for message history
+        columns = ('timestamp', 'from', 'to', 'message')
+        self.history_tree = ttk.Treeview(history_frame, columns=columns, show='headings')
+        
+        # Define column headings and widths
+        headings = {
+            'timestamp': ('Time/Date', 150),
+            'from': ('From', 150),
+            'to': ('To', 150),
+            'message': ('Message', 600)
+        }
+        
+        for col, (heading, width) in headings.items():
+            self.history_tree.heading(col, text=heading)
+            self.history_tree.column(col, width=width, anchor='w' if col == 'message' else 'center')
+        
+        # Add scrollbars
+        y_scrollbar = ttk.Scrollbar(history_frame, orient="vertical", command=self.history_tree.yview)
+        x_scrollbar = ttk.Scrollbar(history_frame, orient="horizontal", command=self.history_tree.xview)
+        self.history_tree.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
+        
+        # Grid layout
+        self.history_tree.grid(row=0, column=0, sticky="nsew")
+        y_scrollbar.grid(row=0, column=1, sticky="ns")
+        x_scrollbar.grid(row=1, column=0, sticky="ew")
+        
+        # Bind events
+        self.modem_dropdown.bind('<<ComboboxSelected>>', self.on_modem_selected)
+
+    def refresh_message_history(self):
+        """Refresh the message history display."""
+        try:
+            # Update modem list in dropdown
+            modems = self.modem_manager.modems
+            modem_list = []
+            
+            # Only include active modems with valid phone numbers
+            for port, modem in modems.items():
+                if modem.get('status') == 'active':
+                    phone = modem.get('phone', 'Unknown')
+                    if phone != 'Unknown':
+                        # Format: "Phone Number (COM Port)"
+                        display_text = f"{phone} ({port})"
+                        modem_list.append(display_text)
+            
+            # Sort the list for easier selection
+            modem_list.sort()
+            
+            # Update dropdown values
+            self.modem_dropdown['values'] = modem_list
+            
+            # If no modem is selected and we have modems, select the first one
+            if not self.modem_var.get() and modem_list:
+                self.modem_var.set(modem_list[0])
+                self.update_message_history()  # Update messages for initial selection
+            elif not modem_list:
+                # Clear the display if no modems are available
+                self.modem_var.set('')
+                for item in self.history_tree.get_children():
+                    self.history_tree.delete(item)
+            
+        except Exception as e:
+            logger.error(f"Error refreshing message history: {e}")
+
+    def update_message_history(self):
+        """Update the message history display for the selected modem."""
+        try:
+            # Clear current display
+            for item in self.history_tree.get_children():
+                self.history_tree.delete(item)
+            
+            selected = self.modem_var.get()
+            if not selected:
+                return
+                
+            # Extract port from selection (format: "phone (port)")
+            port = selected.split('(')[-1].rstrip(')')
+            
+            # Get messages for this modem
+            messages = self.modem_manager.check_sms(port)
+            if not messages:
+                return
+            
+            # Get phone number for this modem
+            modem_info = self.modem_manager.modems.get(port, {})
+            phone_number = modem_info.get('phone', 'Unknown')
+            
+            # Update display with newest messages first
+            for msg in reversed(messages):
+                timestamp = msg.get('timestamp', 'Unknown')
+                # Format timestamp if it's not already formatted
+                if isinstance(timestamp, str) and not timestamp.lower() == 'unknown':
+                    try:
+                        # Try to parse and reformat the timestamp
+                        dt = datetime.strptime(timestamp, '%y/%m/%d,%H:%M:%S')
+                        timestamp = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        pass  # Keep original format if parsing fails
+                
+                self.history_tree.insert('', 0, values=(
+                    timestamp,
+                    msg.get('sender', 'Unknown'),
+                    phone_number,
+                    msg.get('text', '')
+                ))
+                
+        except Exception as e:
+            logger.error(f"Error updating message history: {e}")
+
+    def on_modem_selected(self, event):
+        """Handle modem selection change."""
+        self.update_message_history()
+
+    def run(self):
+        """Start the GUI application."""
+        # Initial device scan
+        self.scan_devices()
+        
+        # Start the main event loop
+        self.root.mainloop()

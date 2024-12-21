@@ -30,6 +30,8 @@ def main():
         # Initialize server with SMS Hub integration
         logger.info("Starting SMS Hub Agent server...")
         server = SmsHubServer()
+        server.host = "0.0.0.0"  # Listen on all interfaces
+        server.port = config.get('server_port', 5000)  # Get port from config or use default 5000
         server.smshub = smshub  # Link SMS Hub to server
         
         # Start server in a separate thread

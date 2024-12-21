@@ -1,7 +1,8 @@
 import logging
 import time
 import threading
-import serial.tools.list_ports
+import serial
+from serial.tools import list_ports
 import re
 from typing import Dict, Optional, List
 from config import config
@@ -10,468 +11,760 @@ logger = logging.getLogger(__name__)
 
 class ModemManager:
     def __init__(self, server=None):
-        self.modems: Dict[str, Dict] = {}  # port -> modem_info
+        """Initialize ModemManager."""
+        self.modems = {}  # port -> modem_info
+        self.server = server
         self.running = False
         self.scan_thread = None
-        self.server = server  # Add server reference
+        self.scan_interval = 10  # seconds
         self.connected_modems = set()  # Track connected modems
-
-    def start(self):
-        """Start modem scanning."""
-        self.running = True
-        self.scan_thread = threading.Thread(target=self._scan_loop, daemon=True)
-        self.scan_thread.start()
-
-    def stop(self):
-        """Stop modem scanning."""
-        self.running = False
-        if self.scan_thread:
-            self.scan_thread.join()
-
-    def _scan_loop(self):
-        """Continuously scan for modems."""
-        while self.running:
-            try:
-                self._scan_modems()
-            except Exception as e:
-                if isinstance(e, serial.serialutil.SerialException) and "could not open port" in str(e):
-                    # Ignore serial port errors, they can happen when a device is temporarily unavailable
-                    logger.debug(f"Serial port error (likely device was unplugged): {e}")
-                    continue
-                logger.error(f"Error scanning modems: {e}")
-            time.sleep(5)  # Scan every 5 seconds
-
+        
     def _scan_modems(self):
-        """Scan for USB modems."""
-        current_ports = set()
-        
-        # List all COM ports
-        for port in serial.tools.list_ports.comports():
-            logger.debug(f"Found port: {port.device} - {port.description}")
+        """Scan for available modems."""
+        try:
+            logger.info("\n=== SCANNING FOR MODEMS ===")
+            # Track ports being processed to avoid duplicates
+            processing_ports = set()
             
-            if self._is_gsm_modem(port):
-                current_ports.add(port.device)
-                if port.device not in self.modems or self.modems[port.device]['status'] == 'error':
-                    self._add_modem(port)
-        
-        # Remove disconnected modems
-        disconnected = set(self.modems.keys()) - current_ports
-        for port in disconnected:
-            self._remove_modem(port)
-
+            # Get current available ports
+            ports = list_ports.comports()
+            current_ports = {p.device: p for p in ports if (p.vid == 0x05C6 or  # Qualcomm
+                                                          p.vid == 0x2C7C or  # Quectel
+                                                          p.vid == 0x1782)}   # SimCom
+            
+            logger.info(f"Found {len(current_ports)} potential modem ports")
+            
+            # Remove disconnected modems first
+            disconnected = set(self.modems.keys()) - set(current_ports.keys())
+            for port in disconnected:
+                logger.info(f"Removing disconnected modem: {port}")
+                self.modems.pop(port)
+            
+            # Add or update modems
+            for port_name, port in current_ports.items():
+                # Skip if port is already being processed
+                if port_name in processing_ports:
+                    continue
+                    
+                # Skip diagnostic and NMEA ports
+                if any(x in port.description.upper() for x in ['DIAGNOSTIC', 'NMEA', 'LOGGING']):
+                    logger.debug(f"Skipping diagnostic/NMEA port: {port_name}")
+                    continue
+                
+                # Only initialize new modems or update existing ones after scan_interval
+                current_time = time.time()
+                if (port_name not in self.modems or 
+                    current_time - self.modems[port_name].get('last_seen', 0) >= self.scan_interval):
+                    
+                    logger.info(f"\nProcessing port: {port_name}")
+                    if port_name in self.modems:
+                        logger.info(f"Previous status: {self.modems[port_name].get('status')}")
+                        logger.info("Updating modem info...")
+                    else:
+                        logger.info("New modem detected")
+                    
+                    # Mark port as being processed
+                    processing_ports.add(port_name)
+                    
+                    try:
+                        modem_info = self._add_modem(port)
+                        if modem_info:
+                            # Log status change if any
+                            old_status = self.modems[port_name].get('status') if port_name in self.modems else None
+                            new_status = modem_info.get('status')
+                            
+                            if old_status != new_status:
+                                logger.info(f"Status changed for {port_name}: {old_status} -> {new_status}")
+                                if new_status != 'active' and modem_info.get('iccid') and modem_info.get('network_status') in ['registered', 'roaming']:
+                                    logger.info("Requirements check:")
+                                    logger.info(f"- ICCID: {modem_info.get('iccid', 'Missing')}")
+                                    logger.info(f"- Network: {modem_info.get('network_status', 'Missing')}")
+                                    logger.info(f"- Phone: {modem_info.get('phone', 'Missing')}")
+                            
+                            if modem_info.get('status') != 'error':
+                                self.modems[port_name] = modem_info
+                                logger.info(f"Added/Updated modem: {port_name} (Status: {modem_info.get('status')})")
+                            else:
+                                # Only add errored modem if it's a new error
+                                if port_name not in self.modems or self.modems[port_name].get('error') != modem_info.get('error'):
+                                    self.modems[port_name] = modem_info
+                                    logger.error(f"Error initializing modem {port_name}: {modem_info.get('error')}")
+                    finally:
+                        # Remove port from processing set even if there was an error
+                        processing_ports.discard(port_name)
+                else:
+                    logger.debug(f"Skipping {port_name} - Recently updated")
+            
+            # Log final modem statuses
+            logger.info("\n=== CURRENT MODEM STATUSES ===")
+            for port, info in self.modems.items():
+                logger.info(f"{port}: {info.get('status')} (ICCID: {'✓' if info.get('iccid') else '✗'}, "
+                          f"Network: {info.get('network_status')}, Phone: {'✓' if info.get('phone') not in [None, 'Unknown'] else '✗'})")
+            logger.info("===============================\n")
+                
+        except Exception as e:
+            logger.error(f"Error scanning modems: {e}")
+            logger.error("Full error details:", exc_info=True)
+            
     def _is_diagnostic_port(self, port) -> bool:
-        """Check if this is a diagnostic or management port."""
-        if not hasattr(port, 'description'):
+        """Check if the port is a diagnostic port."""
+        if not port or not port.description:
             return False
             
-        diagnostic_keywords = [
+        # Check for common diagnostic port indicators
+        diagnostic_indicators = [
             'DIAGNOSTIC',
-            'DIAG',
             'NMEA',
-            'AT INTERFACE',
-            'MANAGEMENT',
-            'QCDM',
-            'QXDM',
-            'PCUI',
             'LOGGING',
-            'DM PORT',
-            'ADB',
-            'QDLoader'
+            'AT INTERFACE',
+            'MODEM INTERFACE',
+            'PCUI',
+            'DM PORT'
         ]
         
-        description = port.description.upper()
-        return any(keyword in description for keyword in diagnostic_keywords)
+        description_upper = port.description.upper()
+        return any(indicator in description_upper for indicator in diagnostic_indicators)
 
-    def _is_franklin_t9(self, port) -> bool:
-        """
-        Specifically check if a port is a Franklin T9 modem.
-        Franklin T9 modems have specific identifiers:
-        - VID: 05C6 (Qualcomm)
-        - Description contains "Qualcomm HS-USB"
-        - Not a diagnostic port
-        """
-        if not hasattr(port, 'description') or not hasattr(port, 'vid'):
-            return False
-
-        is_qualcomm = (
-            hasattr(port, 'vid') and 
-            port.vid == 0x05C6  # Qualcomm's Vendor ID
-        )
+    def _validate_phone_number(self, phone: str) -> str:
+        """Less strict phone validation."""
+        logger.info(f"\n=== VALIDATING PHONE NUMBER ===")
+        logger.info(f"Input phone: {phone}")
         
-        has_correct_description = (
-            "Qualcomm HS-USB" in port.description and
-            not self._is_diagnostic_port(port)
-        )
-        
-        if is_qualcomm and has_correct_description:
-            logger.debug(f"Confirmed Franklin T9 modem on port {port.device}")
-            logger.debug(f"VID: {port.vid:04X}, Description: {port.description}")
-            return True
+        if not phone or phone == 'Unknown':
+            logger.warning("✗ Phone is None or 'Unknown'")
+            return None
             
-        return False
-
-    def _is_gsm_modem(self, port) -> bool:
-        """Check if a port is likely a GSM modem."""
-        if not hasattr(port, 'description'):
-            return False
-
-        description = str(port.description)
-        logger.debug(f"Checking port {port.device} - Description: {description}")
-
-        # Check specifically for Franklin T9 modem first
-        if self._is_franklin_t9(port):
-            return True
-
-        # Common USB IDs for GSM modems
-        gsm_ids = [
-            "12D1",  # Huawei
-            "19D2",  # ZTE
-            "2C7C",  # Quectel
-            "1E0E",  # Qualcomm
-            "0403",  # FTDI
-            "067B",  # Prolific
-            "0483",  # STMicroelectronics
-            "1A86",  # QinHeng Electronics
-            "05C6",  # Qualcomm USB modem
-        ]
+        # Remove any non-digit characters
+        clean_number = ''.join(filter(str.isdigit, phone))
+        logger.info(f"Cleaned number: {clean_number}")
         
-        if not hasattr(port, 'vid'):
-            return False
+        # Must be at least 10 digits
+        if len(clean_number) < 10:
+            logger.warning(f" Too short ({len(clean_number)} digits): {clean_number}")
+            return None
             
-        # Convert VID to hex string and compare
-        vid_hex = f"{port.vid:04X}" if port.vid else ""
-        
-        # Check VID and product description
-        is_modem = (vid_hex in gsm_ids and 
-                   not self._is_diagnostic_port(port) and
-                   (hasattr(port, 'product') and 
-                    any(x in str(port.product).upper() for x in ['MODEM', 'GSM', 'MOBILE', 'WWAN', '3G', '4G', 'LTE'])))
-        
-        if is_modem:
-            logger.debug(f"Found GSM modem: {port.device}")
-        return is_modem
-
-    def _validate_phone_number(self, number: str) -> bool:
-        """Validate phone number format."""
-        if not number:
-            return False
+        # If it's 10 digits, add '1' prefix
+        if len(clean_number) == 10:
+            clean_number = '1' + clean_number
+            logger.info(f"Added '1' prefix: {clean_number}")
+        # If it's longer than 10 digits but doesn't start with 1, add it
+        elif not clean_number.startswith('1'):
+            clean_number = '1' + clean_number
+            logger.info(f"Added '1' prefix to longer number: {clean_number}")
             
-        # Remove common phone number formatting including + prefix
-        clean_number = re.sub(r'[\s\-\(\)\+]', '', number)
+        logger.info(f"✓ Valid phone number: {clean_number}\n")
+        return clean_number
+
+    def _check_network_registration(self, ser) -> str:
+        """Check network registration with retries and detailed diagnostics."""
+        logger.info("\n=== CHECKING NETWORK REGISTRATION ===")
+        max_retries = 3
+        retry_delay = 2  # seconds
         
-        # Check if it's exactly 11 digits (country code + number)
-        is_valid = clean_number.isdigit() and len(clean_number) == 11
-        logger.debug(f"Phone number validation: {number} -> {clean_number} -> {is_valid}")
-        return clean_number if is_valid else None  # Return cleaned number if valid
+        # First check signal quality
+        ser.write(b'AT+CSQ\r\n')
+        time.sleep(0.5)
+        signal_response = ser.read_all().decode('utf-8', errors='ignore')
+        signal_quality = self._parse_signal_quality(signal_response)
+        logger.info(f"Signal Quality: {signal_quality}%")
+        
+        if signal_quality < 10:
+            logger.warning("⚠️ Very weak signal - may affect registration")
+        
+        # Check if SIM is locked
+        ser.write(b'AT+CPIN?\r\n')
+        time.sleep(0.5)
+        pin_response = ser.read_all().decode('utf-8', errors='ignore')
+        if 'READY' not in pin_response:
+            logger.error("✗ SIM card not ready or PIN locked")
+            return 'not_registered'
+        
+        # Check operator selection
+        ser.write(b'AT+COPS?\r\n')
+        time.sleep(0.5)
+        cops_response = ser.read_all().decode('utf-8', errors='ignore')
+        logger.info(f"Current Operator: {cops_response.strip()}")
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"\nAttempt {attempt + 1}/{max_retries}")
+                
+                # Clear input buffer
+                ser.reset_input_buffer()
+                
+                # Send registration check command
+                ser.write(b'AT+CREG?\r\n')
+                time.sleep(0.5)
+                response = ser.read_all().decode('utf-8', errors='ignore')
+                
+                status = self._parse_network_registration(response)
+                logger.info(f"Registration Status: {status}")
+                
+                if status == 'not_registered':
+                    logger.info("Not registered, checking extended status...")
+                    # Check extended registration info
+                    ser.write(b'AT+CREG=2\r\n')  # Enable extended registration info
+                    time.sleep(0.5)
+                    ser.write(b'AT+CREG?\r\n')
+                    time.sleep(0.5)
+                    ext_response = ser.read_all().decode('utf-8', errors='ignore')
+                    logger.info(f"Extended Registration Info: {ext_response.strip()}")
+                    
+                elif status == 'searching':
+                    logger.info("Still searching for network...")
+                    
+                elif status == 'denied':
+                    logger.error("✗ Registration denied by network")
+                    return status
+                    
+                elif status in ['registered', 'roaming']:
+                    logger.info(f"✓ Successfully registered: {status}")
+                    return status
+                    
+                if attempt < max_retries - 1:
+                    logger.info(f"Waiting {retry_delay}s before retry...")
+                    time.sleep(retry_delay)
+                    
+            except Exception as e:
+                logger.error(f"Error checking registration: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    
+        logger.warning("✗ Failed to register after all retries")
+        return 'not_registered'
 
     def _add_modem(self, port):
         """Initialize and add a new modem."""
+        ser = None
         try:
-            logger.debug(f"Attempting to add modem on port {port.device}")
-            modem = serial.Serial(port.device, baudrate=115200, timeout=1)
+            logger.info(f"\n=== ADDING MODEM ON {port.device} ===")
             
-            # Initialize modem
+            # Skip if it's a diagnostic port
+            if self._is_diagnostic_port(port):
+                logger.debug(f"Skipping diagnostic port: {port.device}")
+                return None
+            
+            try:
+                # Try to open the port with a shorter timeout first
+                ser = serial.Serial(
+                    port=port.device,
+                    baudrate=115200,
+                    timeout=1,  # Increased from 0.5
+                    writeTimeout=1,  # Increased from 0.5
+                    exclusive=True
+                )
+                
+            except serial.SerialException as e:
+                if "in use" in str(e).lower() or "access is denied" in str(e).lower():
+                    logger.warning(f"Port {port.device} is busy or access denied, skipping")
+                else:
+                    logger.error(f"Failed to open port {port.device}: {e}")
+                return None
+            except Exception as e:
+                logger.error(f"Unexpected error opening port {port.device}: {e}")
+                return None
+            
+            # Initialize modem with expanded AT commands
             commands = [
-                ('AT', 0.1),  # Basic AT command
-                ('ATE0', 0.1),  # Turn off echo
-                ('AT+CMEE=2', 0.1),  # Extended error reporting
-                ('AT+CIMI', 0.1),  # Get IMSI
-                ('AT+CCID', 0.1),  # Get ICCID
-                ('AT+CREG?', 0.1),  # Get Network Registration Status
-                ('AT+CNUM', 0.1),  # Get phone number
-                ('AT+COPS?', 0.1),  # Get carrier
-                ('AT+CGMM', 0.1),  # Get model number
-                ('AT+CGMR', 0.1),  # Get firmware version
+                ('AT', 0.2),  # Increased delay
+                ('ATE0', 0.2),
+                ('AT+CMEE=2', 0.2),
+                ('AT+GSN', 0.2),
+                ('AT+CGSN', 0.2),
+                ('AT+CIMI', 0.2),
+                ('AT+CCID', 1.0),
+                ('AT^ICCID?', 1.0),
+                ('AT+QCCID', 1.0),
+                ('AT+ZGETICCID', 1.0),
+                ('AT$QCCID?', 1.0),
+                ('AT+ICCID', 1.0),
+                ('AT+CRSM=176,12258,0,0,10', 1.0),
+                ('AT+CREG?', 0.2),
+                ('AT+CNUM', 0.2),
+                ('AT+COPS?', 0.2),
+                ('AT+CSQ', 0.2),
             ]
             
             responses = {}
             for cmd, delay in commands:
-                modem.write(f"{cmd}\r\n".encode())
-                time.sleep(delay)
-                response = modem.read_all().decode('utf-8', errors='ignore')
-                responses[cmd] = response
-                logger.debug(f"Command {cmd} response: {response}")
+                try:
+                    # Clear input buffer before each command
+                    ser.reset_input_buffer()
+                    ser.write(f"{cmd}\r\n".encode())
+                    time.sleep(delay)
+                    response = ser.read_all().decode('utf-8', errors='ignore')
+                    responses[cmd] = response
+                    logger.debug(f"Command {cmd} response: {response}")
+                except Exception as e:
+                    logger.error(f"Error sending command {cmd}: {e}")
+                    continue
+
+            # Parse responses with more lenient validation
+            imei = (self._parse_imei_response(responses['AT+GSN']) or 
+                   self._parse_imei_response(responses['AT+CGSN']))
             
-            # Parse responses
             imsi = self._parse_at_response(responses['AT+CIMI'], '+CIMI')
-            iccid = self._parse_at_response(responses['AT+CCID'], '+CCID')
+            
+            # Try all ICCID responses
+            iccid = None
+            for cmd in [
+                'AT+CCID',
+                'AT^ICCID?',
+                'AT+QCCID',
+                'AT+ZGETICCID',
+                'AT$QCCID?',
+                'AT+ICCID',
+                'AT+CRSM=176,12258,0,0,10'
+            ]:
+                if cmd in responses:
+                    iccid = self._parse_ccid_response(responses[cmd])
+                    if iccid:
+                        logger.info(f"✓ Got ICCID using {cmd}: {iccid}")
+                        break
+
+            # Check network registration with retries
+            reg_status = self._check_network_registration(ser)
+            
+            # Get phone number and carrier
             phone = self._parse_at_response(responses['AT+CNUM'], '+CNUM')
-            registration_status = self._parse_at_response(responses['AT+CREG?'], '+CREG')
             carrier = self._parse_at_response(responses['AT+COPS?'], '+COPS')
-            model = self._parse_at_response(responses['AT+CGMM'], '+CGMM')
-            firmware = self._parse_at_response(responses['AT+CGMR'], '+CGMR')
-            
-            logger.debug(f"Parsed responses - IMSI: {imsi}, ICCID: {iccid}, Phone: {phone}, " +
-                        f"Reg Status: {registration_status}, Carrier: {carrier}, " +
-                        f"Model: {model}, Firmware: {firmware}")
+            signal_quality = self._parse_signal_quality(responses['AT+CSQ'])
 
-            # Determine if this is a Franklin T9 modem
-            is_franklin = self._is_franklin_t9(port)
+            # Determine modem status with more lenient checks
+            status = 'connected'
+            logger.info(f"\n=== MODEM STATUS CHECK for {port.device} ===")
+            logger.info(f"Initial status: {status}")
             
-            # Additional Franklin T9 verification through AT commands
-            if is_franklin:
-                if model and "T9" in model:
-                    logger.info(f"Confirmed Franklin T9 through model number: {model}")
+            # Check SIM (more lenient)
+            if iccid:
+                status = 'sim_ready'
+                logger.info(f"✓ SIM present - Status updated to: {status}")
+                
+                # Check network FIRST (using retry results)
+                if reg_status in ['registered', 'roaming']:
+                    status = 'registered'
+                    logger.info(f"✓ Network registered - Status updated to: {status}")
+                    
+                    # Only validate phone number if we're registered
+                    phone = self._parse_at_response(responses['AT+CNUM'], '+CNUM')
+                    logger.info(f"Raw phone number from network: {phone}")
+                    
+                    validated_phone = self._validate_phone_number(phone)
+                    if validated_phone:
+                        status = 'active'
+                        logger.info(f"✓ Valid phone number - Status updated to: {status}")
+                        phone = validated_phone  # Use validated number
+                    else:
+                        logger.warning(f"✗ Invalid/missing phone number: {phone}")
                 else:
-                    logger.warning(f"Port appears to be Franklin T9 but model number doesn't match: {model}")
-            
-            # Determine modem status
-            if is_franklin:
-                status = 'active'  # Franklin T9 modems are always active
+                    # If not registered, any phone number is invalid
+                    logger.warning(f"✗ Not registered on network. Status: {reg_status}")
+                    phone = None  # Clear any phone number since we're not registered
             else:
-                status = 'active' if registration_status and '0,1' in registration_status or '0,5' in registration_status else 'not_registered'
-            if 'ERROR' in responses['AT']:
-                status = 'error'
-
-            # Only add modem if we got a valid phone number or it's a Franklin T9
-            validated_phone = self._validate_phone_number(phone)
+                logger.warning(f"✗ No valid ICCID found")
+                phone = None  # Clear any phone number since we don't have a valid SIM
             
-            if validated_phone or is_franklin:
-                modem_info = {
-                    'port': port.device,
-                    'imsi': imsi or 'Unknown',
-                    'iccid': iccid or 'Unknown',                    
-                    'phone': validated_phone or 'Unknown',
-                    'status': status,
-                    'last_seen': time.time(),
-                    'manufacturer': port.manufacturer or 'Unknown',
-                    'product': port.product or port.description or 'Unknown',
-                    'model': model or 'Unknown',
-                    'firmware': firmware or 'Unknown',
-                    'vid': f"{port.vid:04X}" if port.vid else 'Unknown',
-                    'pid': f"{port.pid:04X}" if port.pid else 'Unknown',
-                    'carrier': carrier or 'Unknown',
-                    'type': 'Franklin T9' if is_franklin else 'Generic GSM',
-                    'operator': 'physic'  # Always set operator to 'physic'
-                }
-                
-                self.modems[port.device] = modem_info
-                self.connected_modems.add(port.device)  # Mark as connected
-                
-                # Register with server if available
-                if self.server:
-                    self.server.register_modem(validated_phone or port.device, modem_info) # Use validated phone if available
-                    logger.info(f"Registered modem {validated_phone or port.device} with server")
-                
-                logger.info(f"Added modem: {modem_info}")
-            else:
-                logger.debug(f"Skipping port {port.device}: No valid phone number and not a Franklin T9 modem")
+            logger.info(f"=== FINAL STATUS: {status} ===\n")
 
-            modem.close()
+            # Create modem info with phone number only if properly registered
+            modem_info = {
+                'port': port.device,
+                'imei': imei or 'Unknown',
+                'iccid': iccid or 'Unknown',
+                'phone': phone or 'Unknown',
+                'status': status,
+                'last_seen': time.time(),
+                'manufacturer': port.manufacturer or 'Unknown',
+                'product': port.product or port.description or 'Unknown',
+                'vid': f"{port.vid:04X}" if port.vid else 'Unknown',
+                'pid': f"{port.pid:04X}" if port.pid else 'Unknown',
+                'carrier': carrier or 'Unknown',
+                'type': 'Franklin T9' if "Qualcomm HS-USB" in port.description else 'Generic GSM',
+                'operator': 'physic',
+                'signal_quality': signal_quality,
+                'network_status': reg_status,
+                'imsi': imsi or 'Unknown'
+            }
             
+            # Store in local modems dict
+            self.modems[port.device] = modem_info
+            self.connected_modems.add(port.device)
+            
+            # Register with server if active
+            if self.server and status == 'active':
+                try:
+                    self.server.register_modem(port.device, modem_info)
+                    logger.info(f"✓ Registered modem with server: {port.device}")
+                except Exception as e:
+                    logger.error(f"Error registering modem with server: {e}")
+            
+            return modem_info
+
         except Exception as e:
             logger.error(f"Error adding modem on port {port.device}: {e}")
-
-    def _remove_modem(self, port):
-        """Remove a disconnected modem."""
-        if port in self.modems:
-            logger.info(f"Removed modem: {self.modems[port]}")
-            self.modems.pop(port)
+            return None
+            
+        finally:
+            if ser and ser.is_open:
+                try:
+                    ser.close()
+                except Exception as e:
+                    logger.error(f"Error closing port {port.device}: {e}")
 
     def _parse_at_response(self, response: str, command: str) -> Optional[str]:
         """Parse AT command response to extract relevant information."""
         if not response:
             return None
             
-        lines = response.split('\r\n')
-        for line in lines:
-            if command in line:
-                # Extract the value after the command
-                parts = line.split(':')
-                if len(parts) > 1:
-                    value = parts[1].strip()
-                    # Handle CNUM response format
-                    if command == '+CNUM' and ',' in value:
-                        number_parts = value.split(',')
-                        if len(number_parts) >= 2:
-                            # Remove + prefix if present
-                            number = number_parts[1].strip('"').lstrip('+')
-                            return number
-                    # Handle COPS response format
-                    elif command == '+COPS' and ',' in value:
-                        cops_parts = value.split(',')
-                        if len(cops_parts) >= 3:
-                            return cops_parts[2].strip('"')
-                    return value
-                
-            # Handle case where response is just the value
-            elif line.strip() and not any(x in line for x in ['OK', 'ERROR']):
-                return line.strip()
-        return None
-
-    def get_active_modems(self) -> List[Dict]:
-        """Get list of active modems."""
-        return list(self.modems.values())
-
-    def get_modem_by_phone(self, phone: str) -> Optional[Dict]:
-        """Get modem info by phone number"""
-        return next((m for m in self.modems.values() if m['phone'] == phone), None)
-
-    def get_all_device_info(self) -> List[Dict]:
-        """Get information about all connected devices."""
-        devices = []
-        for port, info in self.modems.items():
-            device_info = {
-                'device_name': info.get('product', 'Unknown'),
-                'com_port': port,
-                'imei': info.get('imsi', 'Unknown'),
-                'iccid': info.get('iccid', 'Unknown'),
-                'phone_number': info.get('phone', 'Unknown'),
-                'carrier': info.get('carrier', 'Unknown'),
-                'status': 'Connected' if port in self.connected_modems else 'Disconnected'
-            }
-            devices.append(device_info)
-        return devices
-
-    def check_sms(self, port: str) -> List[Dict]:
-        """Check for SMS messages on a specific modem."""
         try:
+            lines = response.split('\r\n')
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                if command in line:
+                    # Extract the value after the command
+                    parts = line.split(':')
+                    if len(parts) > 1:
+                        value = parts[1].strip()
+                        # Handle CNUM response format
+                        if command == '+CNUM' and ',' in value:
+                            number_parts = value.split(',')
+                            if len(number_parts) >= 2:
+                                # Remove quotes and any non-digit characters except +
+                                number = ''.join(c for c in number_parts[1].strip('"') if c.isdigit() or c == '+')
+                                # Ensure it starts with +1 for US numbers
+                                if not number.startswith('+'):
+                                    number = '+' + number
+                                if not number.startswith('+1'):
+                                    number = '+1' + number.lstrip('+')
+                                logger.info(f"Parsed phone number: {number}")
+                                return number
+                        # Handle COPS response format
+                        elif command == '+COPS' and ',' in value:
+                            cops_parts = value.split(',')
+                            if len(cops_parts) >= 3:
+                                return cops_parts[2].strip('"')
+                        # For other commands, return the value if it looks valid
+                        elif value and not any(x in value for x in ['ERROR', 'OK']):
+                            return value
+                            
+                # Handle case where response is just the value
+                elif line and not any(x in line for x in ['OK', 'ERROR', '+', 'AT']):
+                    # For IMSI/ICCID, validate it's a number
+                    if command in ['+CIMI', '+CCID'] and not line.isdigit():
+                        continue
+                    return line
+                    
+        except Exception as e:
+            logger.error(f"Error parsing AT response for {command}: {e}")
+            logger.error(f"Response was: {response}")
+            
+        return None
+            
+    def _parse_ccid_response(self, response: str) -> Optional[str]:
+        """Parse CCID (SIM card number) from various AT command responses."""
+        try:
+            if not response:
+                return None
+                
+            # Split response into lines and clean them
+            lines = [line.strip() for line in response.split('\r\n') if line.strip()]
+            
+            for line in lines:
+                # Remove any non-digit characters for checking
+                digits_only = ''.join(filter(str.isdigit, line))
+                
+                # If we find a 19-20 digit number anywhere in the response, that's likely the ICCID
+                if len(digits_only) >= 19 and len(digits_only) <= 20:
+                    return digits_only
+                
+                # Check various response formats
+                prefixes = ['+CCID:', '^ICCID:', '+ICCID:', '+QCCID:', '$QCCID:', 'ICCID:', '+CRSM:']
+                for prefix in prefixes:
+                    if prefix in line:
+                        # Split on the prefix and take the latter part
+                        value = line.split(prefix)[-1].strip()
+                        # Clean up any quotes, spaces, or commas
+                        value = value.strip('"').strip().split(',')[0]
+                        # Extract just the digits
+                        digits = ''.join(filter(str.isdigit, value))
+                        if len(digits) >= 19 and len(digits) <= 20:
+                            return digits
+                            
+            logger.debug(f"Could not parse CCID from response: {response}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error parsing CCID response: {e}")
+            return None
+
+    def check_sms(self, port):
+        """Check for new SMS messages on the specified port."""
+        ser = None
+        try:
+            # Validate port exists
             if port not in self.modems:
                 logger.error(f"Port {port} not found in modems")
                 return []
 
-            modem = serial.Serial(port, baudrate=115200, timeout=1)
-            messages = []
+            # Try to open and configure port
+            try:
+                ser = serial.Serial(
+                    port=port,
+                    baudrate=115200,
+                    timeout=1,
+                    writeTimeout=1,
+                    exclusive=True  # Use exclusive access for Windows compatibility
+                )
+            except serial.SerialException as e:
+                if "in use" in str(e).lower():
+                    logger.warning(f"Port {port} is busy")
+                else:
+                    logger.error(f"Failed to open port {port}: {e}")
+                return []
 
-            # Set text mode
-            modem.write(b'AT+CMGF=1\r\n')
-            time.sleep(0.1)
-            modem.read_all()  # Clear buffer
-
-            # List all messages
-            modem.write(b'AT+CMGL="ALL"\r\n')
-            time.sleep(0.5)
-            response = modem.read_all().decode('utf-8', errors='ignore')
-
-            # Parse messages
-            msg_lines = response.split('\r\n')
-            current_msg = None
-
-            for line in msg_lines:
-                if line.startswith('+CMGL:'):
-                    if current_msg:
-                        messages.append(current_msg)
-                    # Parse message header
-                    parts = line.split(',')
-                    if len(parts) >= 4:
-                        current_msg = {
-                            'index': parts[0].split(':')[1].strip(),
-                            'status': parts[1].strip('"'),
-                            'sender': parts[2].strip('"'),
-                            'timestamp': parts[4].strip('"') if len(parts) > 4 else '',
-                            'text': ''
-                        }
-                elif line.strip() and current_msg:
-                    current_msg['text'] = line.strip()
-
-            if current_msg:
-                messages.append(current_msg)
-
-            modem.close()
-            return messages
-
+            try:
+                # Clear any pending data
+                ser.reset_input_buffer()
+                
+                # Initialize modem
+                ser.write(b'AT\r\n')
+                time.sleep(0.1)
+                ser.write(b'AT+CMGF=1\r\n')  # Set text mode
+                time.sleep(0.1)
+                ser.write(b'AT+CSCS="GSM"\r\n')  # Set GSM character set
+                time.sleep(0.1)
+                
+                # Read SMS messages
+                ser.write(b'AT+CMGL="ALL"\r\n')
+                time.sleep(1)  # Wait for response
+                
+                # Try different encodings
+                raw_response = ser.read_all()
+                response = None
+                
+                for encoding in ['utf-8', 'ascii', 'iso-8859-1', 'cp1252']:
+                    try:
+                        response = raw_response.decode(encoding, errors='replace')
+                        if response:
+                            break
+                    except Exception as e:
+                        logger.debug(f"Failed to decode with {encoding}: {e}")
+                        continue
+                
+                if not response:
+                    logger.error(f"Could not decode modem response with any encoding")
+                    return []
+                
+                messages = []
+                
+                # Parse SMS messages
+                lines = response.split('\r\n')
+                i = 0
+                while i < len(lines):
+                    line = lines[i].strip()
+                    if line.startswith('+CMGL:'):
+                        try:
+                            # Parse message header
+                            parts = line.split(',')
+                            if len(parts) >= 4:
+                                msg_id = parts[0].split(':')[1].strip()
+                                status = parts[1].strip('"')
+                                sender = parts[2].strip('"')
+                                timestamp = parts[3].strip('"')
+                                
+                                # Read message text (next line)
+                                i += 1
+                                if i < len(lines):
+                                    text = lines[i].strip()
+                                    # Replace any invalid characters
+                                    text = ''.join(char if ord(char) < 128 else '?' for char in text)
+                                    
+                                    messages.append({
+                                        'id': msg_id,
+                                        'status': status,
+                                        'sender': sender,
+                                        'timestamp': timestamp,
+                                        'text': text
+                                    })
+                                    
+                                    # Delete processed message
+                                    ser.write(f'AT+CMGD={msg_id}\r\n'.encode())
+                                    time.sleep(0.1)
+                                    logger.info(f"Successfully processed SMS from {sender}")
+                        except Exception as e:
+                            logger.error(f"Error parsing SMS message: {e}")
+                    i += 1
+                            
+                return messages
+                
+            finally:
+                # Make sure port is closed
+                if ser and ser.is_open:
+                    try:
+                        ser.close()
+                    except:
+                        pass
+                
         except Exception as e:
             logger.error(f"Error checking SMS on port {port}: {e}")
+            # Make sure port is closed on error
+            if ser and ser.is_open:
+                try:
+                    ser.close()
+                except:
+                    pass
             return []
-
-    def send_at_command(self, port: str, command: str) -> str:
-        """Send AT command to modem and return response."""
+            
+    def handle_sms_received(self, port: str, sender: str, text: str) -> bool:
+        """Handle received SMS message."""
         try:
-            if port not in self.modems:
-                return "Error: Port not found"
-
-            modem = serial.Serial(port, baudrate=115200, timeout=1)
+            logger.info("========== NEW SMS RECEIVED ==========")
+            logger.info(f"Port: {port}")
+            logger.info(f"Sender: {sender}")
+            logger.info(f"Text: {text}")
+            logger.info(f"Current modems: {self.modems}")
             
-            # Add AT prefix if not present
-            if not command.upper().startswith('AT'):
-                command = 'AT' + command
-
-            # Send command
-            modem.write(f"{command}\r\n".encode())
-            time.sleep(0.5)
-            response = modem.read_all().decode('utf-8', errors='ignore')
+            # Find modem by port
+            modem = self.modems.get(port)
+            if not modem:
+                logger.error(f"No modem found for port {port}")
+                return False
+                
+            logger.info(f"Found modem: {modem}")
             
-            modem.close()
-            return response.strip()
-
+            # Get phone number, ensuring proper format
+            phone = modem.get('phone', '')
+            if not phone or phone == 'Unknown':
+                logger.error(f"No phone number for modem on port {port}")
+                return False
+                
+            # Ensure proper phone number format for US numbers
+            phone = phone.lstrip('+').lstrip('1')  # Remove any existing prefixes
+            phone = f"+1{phone}"  # Add +1 prefix
+            
+            logger.info(f"Phone number: {phone}")
+            
+            # Forward to server
+            if self.server:
+                logger.info("Forwarding SMS to server...")
+                return self.server.handle_incoming_sms(phone, sender, text)
+            else:
+                logger.error("No server configured")
+                return False
+                
         except Exception as e:
-            logger.error(f"Error sending AT command to port {port}: {e}")
-            return f"Error: {str(e)}"
-
-    def find_franklin_t9_devices(self) -> List[str]:
-        """Find Franklin T9 modems."""
-        new_ports = []
-        for port in serial.tools.list_ports.comports():
-            if "Qualcomm HS-USB" in port.description and not self._is_diagnostic_port(port):
-                if port.device not in self.modems:
-                    new_ports.append(port.device)
-        return new_ports
-
-    def connect_all(self):
-        """Connect to all modems."""
-        for port in self.modems:
+            logger.error(f"Error handling SMS: {e}")
+            logger.error("Full error details:", exc_info=True)
+            return False
+            
+    def _scan_loop(self):
+        """Main scanning loop."""
+        while self.running:
             try:
-                modem = serial.Serial(port, baudrate=115200, timeout=1)
-                modem.close()
-                self.connected_modems.add(port)
-                logger.info(f"Connected to modem on port {port}")
+                # Scan for new modems
+                self._scan_modems()
+                
+                # Check each modem for SMS only if it's not being initialized
+                for port in list(self.modems.keys()):
+                    if self.modems[port].get('status') == 'active':  # Only check active modems
+                        messages = self.check_sms(port)
+                        for msg in messages:
+                            try:
+                                # Get phone number for this port
+                                phone = self.modems[port].get('phone')
+                                if phone:
+                                    self.handle_sms_received(port, msg['sender'], msg['text'])
+                            except Exception as e:
+                                logger.error(f"Error handling SMS message: {e}")
+                        
             except Exception as e:
-                logger.error(f"Failed to connect to modem on port {port}: {e}")
+                logger.error(f"Error in scan loop: {e}")
+                
+            # Wait for next scan
+            time.sleep(self.scan_interval)
+            
+    def start(self):
+        """Start the modem manager."""
+        if not self.running:
+            self.running = True
+            self.scan_thread = threading.Thread(target=self._scan_loop)
+            self.scan_thread.daemon = True
+            self.scan_thread.start()
+            logger.info("ModemManager started")
+            
+    def stop(self):
+        """Stop the modem manager."""
+        self.running = False
+        if self.scan_thread:
+            self.scan_thread.join()
+            logger.info("ModemManager stopped")
 
-    def disconnect_all(self):
-        """Disconnect from all modems."""
-        self.connected_modems.clear()
-        logger.info("Disconnected from all modems")
-
-    def _get_imei(self, port) -> str:
-        """Get IMEI from modem."""
+    def _parse_network_registration(self, response: str) -> str:
+        """Parse network registration status from AT+CREG? response."""
         try:
-            with serial.Serial(port.device, baudrate=115200, timeout=1) as modem:
-                modem.write(b'AT+CGSN\r\n')
-                time.sleep(0.1)
-                response = modem.read_all().decode('utf-8', errors='ignore')
-                # Extract IMEI from response
-                match = re.search(r'\d{15}', response)
-                return match.group(0) if match else 'N/A'
+            if not response:
+                return 'unknown'
+                
+            # Look for +CREG: n,stat pattern
+            match = re.search(r'\+CREG:\s*\d,(\d)', response)
+            if match:
+                status_code = match.group(1)
+                return {
+                    '0': 'not_registered',
+                    '1': 'registered',
+                    '2': 'searching',
+                    '3': 'denied',
+                    '4': 'unknown',
+                    '5': 'roaming'
+                }.get(status_code, 'unknown')
+            
+            return 'unknown'
         except Exception as e:
-            logger.error(f"Error getting IMEI: {e}")
-            return 'N/A'
+            logger.error(f"Error parsing network registration: {e}")
+            return 'unknown'
 
-    def _get_phone_number(self, port) -> str:
-        """Get phone number from modem."""
+    def _parse_signal_quality(self, response: str) -> int:
+        """Parse signal quality from AT+CSQ response."""
         try:
-            with serial.Serial(port.device, baudrate=115200, timeout=1) as modem:
-                modem.write(b'AT+CNUM\r\n')
-                time.sleep(0.1)
-                response = modem.read_all().decode('utf-8', errors='ignore')
-                # Extract phone number from response
-                match = re.search(r'\+1(\d{10})', response)
-                return match.group(1) if match else 'N/A'
+            if not response:
+                return 0
+                
+            # Look for +CSQ: rssi,ber pattern
+            match = re.search(r'\+CSQ:\s*(\d+),', response)
+            if match:
+                rssi = int(match.group(1))
+                # Convert to percentage (0-31 range to 0-100)
+                if rssi == 99:  # 99 means unknown
+                    return 0
+                return min(100, int((rssi / 31) * 100))
+            
+            return 0
         except Exception as e:
-            logger.error(f"Error getting phone number: {e}")
-            return 'N/A'
+            logger.error(f"Error parsing signal quality: {e}")
+            return 0
 
-    def _get_signal_strength(self, port) -> str:
-        """Get signal strength from modem."""
+    def _parse_imei_response(self, response: str) -> Optional[str]:
+        """Parse IMEI from AT+GSN or AT+CGSN response."""
         try:
-            with serial.Serial(port.device, baudrate=115200, timeout=1) as modem:
-                modem.write(b'AT+CSQ\r\n')
-                time.sleep(0.1)
-                response = modem.read_all().decode('utf-8', errors='ignore')
-                # Extract signal strength from response
-                match = re.search(r'\+CSQ:\s*(\d+),', response)
-                if match:
-                    csq = int(match.group(1))
-                    if csq == 99:
-                        return 'No Signal'
-                    # Convert CSQ to percentage (0-31 scale)
-                    percentage = min(100, int((csq / 31) * 100))
-                    return f"{percentage}%"
-                return 'N/A'
+            if not response:
+                return None
+                
+            # Split response into lines and clean them
+            lines = [line.strip() for line in response.split('\r\n') if line.strip()]
+            
+            for line in lines:
+                # IMEI should be exactly 15 digits
+                digits_only = ''.join(filter(str.isdigit, line))
+                if len(digits_only) == 15:
+                    logger.debug(f"Found valid IMEI: {digits_only}")
+                    return digits_only
+                    
+            logger.debug(f"Could not parse IMEI from response: {response}")
+            return None
+            
         except Exception as e:
-            logger.error(f"Error getting signal strength: {e}")
-            return 'N/A'
-
-    def get_modems(self) -> Dict[str, Dict]:
-        """Get all registered modems."""
-        return self.modems
+            logger.error(f"Error parsing IMEI response: {e}")
+            return None

@@ -4,6 +4,7 @@ import json
 import os
 from datetime import datetime
 from typing import Dict, Any, List
+import time
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -13,6 +14,7 @@ class ActivationLogger:
     def __init__(self, db_path: str = 'activations.db', log_path: str = 'logs'):
         self.db_path = db_path
         self.log_path = log_path
+        self.conn = None  # Store connection for in-memory database
         
         # Ensure log directory exists
         os.makedirs(log_path, exist_ok=True)
@@ -20,45 +22,82 @@ class ActivationLogger:
         # Initialize database
         self._init_db()
         
+    def _get_db_connection(self):
+        """Get a database connection with proper settings."""
+        if self.db_path == ':memory:':
+            if self.conn is None:
+                self.conn = sqlite3.connect(self.db_path)
+                self.conn.row_factory = sqlite3.Row
+            return self.conn
+        else:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+        
     def _init_db(self):
         """Initialize SQLite database and create tables if they don't exist."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                # Create activations table
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS activations (
-                        activation_id INTEGER PRIMARY KEY,
-                        phone_number TEXT,
-                        service TEXT,
-                        operator TEXT,
-                        status TEXT,
-                        created_at TIMESTAMP,
-                        updated_at TIMESTAMP,
-                        sum_amount REAL,
-                        currency TEXT
-                    )
-                ''')
-                
-                # Create events table
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS activation_events (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        activation_id INTEGER,
-                        event_type TEXT,
-                        event_data TEXT,
-                        timestamp TIMESTAMP,
-                        FOREIGN KEY (activation_id) REFERENCES activations (activation_id)
-                    )
-                ''')
-                
-                conn.commit()
-                logger.info("Database initialized successfully")
+            conn = self._get_db_connection()
+            cursor = conn.cursor()
+            
+            # Enable foreign keys
+            cursor.execute('PRAGMA foreign_keys = ON')
+            
+            # Create activations table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS activations (
+                    activation_id INTEGER PRIMARY KEY,
+                    phone_number TEXT NOT NULL,
+                    service TEXT NOT NULL,
+                    operator TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    sum_amount REAL NOT NULL DEFAULT 0.0,
+                    currency TEXT NOT NULL DEFAULT 'RUB'
+                )
+            ''')
+            
+            # Create events table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS activation_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    activation_id INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    event_data TEXT,
+                    timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (activation_id) REFERENCES activations (activation_id)
+                )
+            ''')
+            
+            # Create indices for better performance
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_activations_phone 
+                ON activations(phone_number)
+            ''')
+            
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_events_activation 
+                ON activation_events(activation_id)
+            ''')
+            
+            conn.commit()
+            logger.info("Database initialized successfully")
+            
+            if self.db_path != ':memory:':
+                conn.close()
                 
         except Exception as e:
             logger.error(f"Error initializing database: {e}")
             raise
+
+    def __del__(self):
+        """Cleanup database connection on object destruction."""
+        if self.conn is not None:
+            try:
+                self.conn.close()
+            except:
+                pass
 
     def log_activation_created(self, activation_id: int, phone: str, service: str, 
                              operator: str, sum_amount: float, currency: str):
@@ -67,38 +106,43 @@ class ActivationLogger:
         
         # Log to database
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_db_connection() as conn:
                 cursor = conn.cursor()
-                
-                # Insert into activations table
-                cursor.execute('''
-                    INSERT INTO activations (
-                        activation_id, phone_number, service, operator, 
-                        status, created_at, updated_at, sum_amount, currency
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (activation_id, phone, service, operator, 'created', 
-                     timestamp, timestamp, sum_amount, currency))
-                
-                # Insert event
-                event_data = {
-                    'phone': phone,
-                    'service': service,
-                    'operator': operator,
-                    'sum_amount': sum_amount,
-                    'currency': currency
-                }
-                
-                cursor.execute('''
-                    INSERT INTO activation_events (
-                        activation_id, event_type, event_data, timestamp
-                    ) VALUES (?, ?, ?, ?)
-                ''', (activation_id, 'created', json.dumps(event_data), timestamp))
-                
-                conn.commit()
+                cursor.execute('BEGIN TRANSACTION')
+                try:
+                    # Insert into activations table
+                    cursor.execute('''
+                        INSERT INTO activations (
+                            activation_id, phone_number, service, operator, 
+                            status, created_at, updated_at, sum_amount, currency
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (activation_id, phone, service, operator, 'created', 
+                         timestamp, timestamp, sum_amount, currency))
+                    
+                    # Insert event
+                    event_data = {
+                        'phone': phone,
+                        'service': service,
+                        'operator': operator,
+                        'sum_amount': sum_amount,
+                        'currency': currency
+                    }
+                    
+                    cursor.execute('''
+                        INSERT INTO activation_events (
+                            activation_id, event_type, event_data, timestamp
+                        ) VALUES (?, ?, ?, ?)
+                    ''', (activation_id, 'created', json.dumps(event_data), timestamp))
+                    
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    raise e
                 
         except Exception as e:
             logger.error(f"Error logging activation creation to database: {e}")
-            
+            raise
+        
         # Log to file
         log_file = os.path.join(self.log_path, f'activation_{activation_id}.log')
         try:
@@ -117,8 +161,7 @@ class ActivationLogger:
         except Exception as e:
             logger.error(f"Error logging activation creation to file: {e}")
 
-    def log_activation_status_update(self, activation_id: int, status: int, 
-                                   additional_data: Dict[str, Any] = None):
+    def log_activation_status_update(self, activation_id: int, status: int, additional_data: Dict[str, Any] = None):
         """Log when an activation status is updated."""
         timestamp = datetime.now()
         status_map = {
@@ -129,34 +172,50 @@ class ActivationLogger:
         }
         status_text = status_map.get(status, f'unknown_{status}')
         
-        # Log to database
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_db_connection() as conn:
                 cursor = conn.cursor()
-                
-                # Update activations table
-                cursor.execute('''
-                    UPDATE activations 
-                    SET status = ?, updated_at = ?
-                    WHERE activation_id = ?
-                ''', (status_text, timestamp, activation_id))
-                
-                # Insert event
-                event_data = {'status': status_text}
-                if additional_data:
-                    event_data.update(additional_data)
-                
-                cursor.execute('''
-                    INSERT INTO activation_events (
-                        activation_id, event_type, event_data, timestamp
-                    ) VALUES (?, ?, ?, ?)
-                ''', (activation_id, 'status_update', json.dumps(event_data), timestamp))
-                
-                conn.commit()
+                cursor.execute('BEGIN TRANSACTION')
+                try:
+                    # Check if activation exists
+                    cursor.execute('SELECT 1 FROM activations WHERE activation_id = ?', (activation_id,))
+                    if not cursor.fetchone():
+                        # Create activation record if it doesn't exist
+                        cursor.execute('''
+                            INSERT INTO activations (
+                                activation_id, phone_number, service, operator, 
+                                status, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''', (activation_id, 'unknown', 'unknown', 'unknown', 
+                             status_text, timestamp, timestamp))
+                    
+                    # Update activations table
+                    cursor.execute('''
+                        UPDATE activations 
+                        SET status = ?, updated_at = ?
+                        WHERE activation_id = ?
+                    ''', (status_text, timestamp, activation_id))
+                    
+                    # Insert event
+                    event_data = {'status': status_text}
+                    if additional_data:
+                        event_data.update(additional_data)
+                        
+                    cursor.execute('''
+                        INSERT INTO activation_events (
+                            activation_id, event_type, event_data, timestamp
+                        ) VALUES (?, ?, ?, ?)
+                    ''', (activation_id, 'status_update', json.dumps(event_data), timestamp))
+                    
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    raise e
                 
         except Exception as e:
             logger.error(f"Error logging activation status update to database: {e}")
-            
+            raise
+        
         # Log to file
         log_file = os.path.join(self.log_path, f'activation_{activation_id}.log')
         try:
@@ -178,7 +237,7 @@ class ActivationLogger:
         
         # Log to database
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Insert event
@@ -213,6 +272,50 @@ class ActivationLogger:
         except Exception as e:
             logger.error(f"Error logging SMS receipt to file: {e}")
 
+    def log_sms_delivered(self, activation_id: int, text: str, recipient: str = None, delivery_status: str = None):
+        """Log when an SMS is successfully delivered to SMS Hub."""
+        timestamp = datetime.now()
+        
+        # Log to database
+        try:
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Insert event
+                event_data = {
+                    'text': text,
+                    'recipient': recipient,
+                    'delivery_status': delivery_status,
+                    'delivery_time': timestamp.isoformat()
+                }
+                
+                cursor.execute('''
+                    INSERT INTO activation_events (
+                        activation_id, event_type, event_data, timestamp
+                    ) VALUES (?, ?, ?, ?)
+                ''', (activation_id, 'sms_delivered', json.dumps(event_data), timestamp))
+                
+                conn.commit()
+                
+        except Exception as e:
+            logger.error(f"Error logging SMS delivery to database: {e}")
+            
+        # Log to file
+        log_file = os.path.join(self.log_path, f'activation_{activation_id}.log')
+        try:
+            with open(log_file, 'a') as f:
+                log_entry = {
+                    'timestamp': timestamp.isoformat(),
+                    'event': 'sms_delivered',
+                    'text': text,
+                    'recipient': recipient,
+                    'delivery_status': delivery_status
+                }
+                f.write(json.dumps(log_entry) + '\n')
+                
+        except Exception as e:
+            logger.error(f"Error logging SMS delivery to file: {e}")
+
     def get_activation_history(self, activation_id: int) -> Dict[str, Any]:
         """Get complete history of an activation from both database and log file."""
         result = {
@@ -223,8 +326,7 @@ class ActivationLogger:
         
         # Get from database
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            with self._get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Get activation info
@@ -245,6 +347,7 @@ class ActivationLogger:
                 
         except Exception as e:
             logger.error(f"Error retrieving activation history from database: {e}")
+            raise
         
         # Get from log file
         log_file = os.path.join(self.log_path, f'activation_{activation_id}.log')
@@ -254,7 +357,7 @@ class ActivationLogger:
                     result['log_file_entries'] = [json.loads(line) for line in f]
         except Exception as e:
             logger.error(f"Error retrieving activation history from log file: {e}")
-            
+        
         return result
 
     def search_activations(self, **kwargs) -> List[Dict[str, Any]]:
@@ -268,8 +371,7 @@ class ActivationLogger:
                 params.append(value)
                 
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            with self._get_db_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(query, params)
                 return [dict(row) for row in cursor.fetchall()]
