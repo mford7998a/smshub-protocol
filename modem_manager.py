@@ -23,14 +23,14 @@ class ModemManager:
         """Scan for available modems."""
         try:
             logger.info("\n=== SCANNING FOR MODEMS ===")
-            # Track ports being processed to avoid duplicates
             processing_ports = set()
             
-            # Get current available ports
             ports = list_ports.comports()
-            current_ports = {p.device: p for p in ports if (p.vid == 0x05C6 or  # Qualcomm
-                                                          p.vid == 0x2C7C or  # Quectel
-                                                          p.vid == 0x1782)}   # SimCom
+            # Only accept Qualcomm devices (Franklin T9)
+            current_ports = {p.device: p for p in ports if (
+                p.vid == 0x05C6 and  # Qualcomm VID
+                "Qualcomm HS-USB" in p.description  # Franklin T9 identifier
+            )}
             
             logger.info(f"Found {len(current_ports)} potential modem ports")
             
