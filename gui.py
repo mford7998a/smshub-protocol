@@ -89,39 +89,45 @@ class ModemGUI(ttk.Frame):
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
         
-        # Create Treeview without fixed height
-        columns = ('status', 'com_port', 'imei', 'iccid', 'phone', 'carrier', 'signal', 'sim_ok', 'network_ok', 'phone_ok')
-        self.device_tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
-        
-        # Add scrollbars
-        y_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.device_tree.yview)
-        x_scrollbar = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.device_tree.xview)
-        self.device_tree.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
-        
-        # Grid layout for treeview and scrollbars
-        self.device_tree.grid(row=0, column=0, sticky="nsew")
-        y_scrollbar.grid(row=0, column=1, sticky="ns")
-        x_scrollbar.grid(row=1, column=0, sticky="ew")
+        # Create Treeview with all columns
+        columns = (
+            "port", "status", "iccid", "network", "phone", "carrier", 
+            "signal", "type", "last_seen", "total_activations", 
+            "total_earnings", "today_earnings"
+        )
+        self.devices_tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
         
         # Define column headings and widths
         headings = {
-            'status': ('Status', 150),
-            'com_port': ('COM Port', 100),
-            'imei': ('IMEI', 150),
-            'iccid': ('ICC ID', 150),
-            'phone': ('Phone Number', 120),
-            'carrier': ('Carrier', 150),
-            'signal': ('Signal', 80),
-            'sim_ok': ('SIM', 50),
-            'network_ok': ('Network', 70),
-            'phone_ok': ('Phone', 60)
+            'port': ('Port', 100),
+            'status': ('Status', 80),
+            'iccid': ('ICCID', 150),
+            'network': ('Network', 100),
+            'phone': ('Phone', 120),
+            'carrier': ('Carrier', 120),
+            'signal': ('Signal', 60),
+            'type': ('Type', 100),
+            'last_seen': ('Last Seen', 150),
+            'total_activations': ('Activations', 100),
+            'total_earnings': ('Total Earnings', 100),
+            'today_earnings': ("Today's Earnings", 100)
         }
         
         for col, (heading, width) in headings.items():
-            self.device_tree.heading(col, text=heading)
-            self.device_tree.column(col, width=width, anchor='center')
+            self.devices_tree.heading(col, text=heading)
+            self.devices_tree.column(col, width=width, anchor='center')
         
-        self.device_tree.bind('<<TreeviewSelect>>', self.on_select)
+        # Add scrollbars
+        y_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.devices_tree.yview)
+        x_scrollbar = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.devices_tree.xview)
+        self.devices_tree.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
+        
+        # Grid layout for treeview and scrollbars
+        self.devices_tree.grid(row=0, column=0, sticky="nsew")
+        y_scrollbar.grid(row=0, column=1, sticky="ns")
+        x_scrollbar.grid(row=1, column=0, sticky="ew")
+        
+        self.devices_tree.bind('<<TreeviewSelect>>', self.on_select)
         
         # Control Frame
         control_frame = ttk.Frame(self.device_tab)
@@ -300,10 +306,10 @@ class ModemGUI(ttk.Frame):
 
     def on_select(self, event):
         """Handle device selection."""
-        selection = self.device_tree.selection()
+        selection = self.devices_tree.selection()
         if selection:
-            item = self.device_tree.item(selection[0])
-            new_port = item['values'][1]  # COM port is at index 1
+            item = self.devices_tree.item(selection[0])
+            new_port = item['values'][0]  # Port is at index 0 now
             
             # Only update if selection actually changed
             if new_port != self.selected_port:
@@ -556,8 +562,8 @@ class ModemGUI(ttk.Frame):
         """Update the device information display."""
         try:
             # Clear existing items
-            for item in self.device_tree.get_children():
-                self.device_tree.delete(item)
+            for item in self.devices_tree.get_children():
+                self.devices_tree.delete(item)
             
             # Get current modem info directly from modems dictionary
             modems = self.modem_manager.modems
@@ -570,31 +576,20 @@ class ModemGUI(ttk.Frame):
             for port, modem in modems.items():
                 # Get modem status and requirements
                 status = modem.get('status', 'unknown')
-                iccid_ok = modem.get('iccid') not in [None, 'Unknown']
-                network_ok = modem.get('network_status') in ['registered', 'roaming']
-                phone_ok = modem.get('phone') not in [None, 'Unknown']
                 
-                # Build status display
-                status_display = status
-                if status != 'active':
-                    missing = []
-                    if not iccid_ok:
-                        missing.append('SIM')
-                    if not network_ok:
-                        missing.append('Network')
-                    if not phone_ok:
-                        missing.append('Phone')
-                    if missing:
-                        status_display += f" (Missing: {', '.join(missing)})"
-                
-                # Format phone number
+                # Get activation stats for this phone number
                 phone = modem.get('phone', 'Unknown')
-                if phone == 'Unknown':
-                    phone_display = 'Not Available'
+                if phone != 'Unknown':
+                    stats = self.server.activation_logger.get_activations_by_phone(phone)
+                    total_activations = stats['total_activations']
+                    total_earnings = stats['total_earnings']
+                    today_earnings = stats['today_earnings']
                 else:
-                    phone_display = phone
+                    total_activations = 0
+                    total_earnings = 0.0
+                    today_earnings = 0.0
                 
-                # Get carrier info
+                # Format carrier info
                 carrier = modem.get('carrier', 'Unknown')
                 network_status = modem.get('network_status', 'Unknown')
                 if carrier == '0':
@@ -613,27 +608,29 @@ class ModemGUI(ttk.Frame):
                 
                 # Insert into tree with colored status
                 status_color = 'green' if status == 'active' else 'red'
-                item_id = self.device_tree.insert('', 'end', values=(
-                    status_display,
+                item_id = self.devices_tree.insert('', 'end', values=(
                     port,
-                    modem.get('imei', 'Unknown'),
+                    status,
                     modem.get('iccid', 'Unknown'),
-                    phone_display,
+                    network_status,
+                    phone,
                     carrier_display,
                     signal_display,
-                    "✓" if iccid_ok else "✗",
-                    "✓" if network_ok else "✗",
-                    "✓" if phone_ok else "✗"
+                    modem.get('type', 'Unknown'),
+                    datetime.fromtimestamp(modem['last_seen']).strftime('%Y-%m-%d %H:%M:%S'),
+                    total_activations,
+                    f"${total_earnings:.2f}",
+                    f"${today_earnings:.2f}"
                 ), tags=(status_color,))
                 
                 # If this was the selected device, reselect it
                 if port == self.selected_port:
-                    self.device_tree.selection_set(item_id)
-                    self.device_tree.see(item_id)
+                    self.devices_tree.selection_set(item_id)
+                    self.devices_tree.see(item_id)
             
             # Configure tag colors
-            self.device_tree.tag_configure('green', foreground='green')
-            self.device_tree.tag_configure('red', foreground='red')
+            self.devices_tree.tag_configure('green', foreground='green')
+            self.devices_tree.tag_configure('red', foreground='red')
                 
         except Exception as e:
             logger.error(f"Error updating device info: {e}")
