@@ -561,8 +561,8 @@ class SmsHubServer:
             logger.info(f"Generated SMS ID: {sms_id}")
             
             # Forward to SMS Hub with retries
-            max_retries = 3  # Reduced from 10 for testing
-            retry_delay = 1  # Reduced from 10 for testing
+            max_retries = 3
+            retry_delay = 1
             
             for attempt in range(max_retries):
                 try:
@@ -590,8 +590,8 @@ class SmsHubServer:
                     }
                     logger.info(f"Request details: {json.dumps(request_data, indent=2)}")
                     
-                    # Make the API call
-                    response = self.smshub_integration.push_sms(
+                    # Make the API call using smshub instead of smshub_integration
+                    response = self.smshub.push_sms(
                         sms_id=sms_id,
                         phone=int(clean_phone),  # Must be numeric
                         phone_from=service_code,  # Pass service code instead of sender
@@ -601,7 +601,15 @@ class SmsHubServer:
                     # Log the raw response for debugging
                     logger.info(f"SMS Hub raw response: {response}")
                     
-                    if response and response.get('status') == 'SUCCESS':
+                    # Handle both boolean and dictionary response formats
+                    if isinstance(response, bool):
+                        success = response
+                    elif isinstance(response, dict):
+                        success = response.get('status') == 'SUCCESS'
+                    else:
+                        success = False
+                        
+                    if success:
                         logger.info(f"Successfully forwarded SMS to SMS Hub - ID: {sms_id}")
                         # Log successful delivery
                         self.log_sms_delivery(
@@ -611,30 +619,21 @@ class SmsHubServer:
                         )
                         return True
                     else:
-                        logger.error(f"SMS Hub returned unexpected response format: {response}")
-                    
-                    logger.warning(f"Failed to forward SMS - Attempt {attempt + 1}/{max_retries}")
-                    if attempt < max_retries - 1:  # Don't sleep on last attempt
-                        time.sleep(retry_delay)
+                        logger.warning(f"Failed to forward SMS - Attempt {attempt + 1}/{max_retries}")
+                        if attempt < max_retries - 1:  # Don't sleep on last attempt
+                            time.sleep(retry_delay)
                     
                 except Exception as e:
                     logger.error(f"Error forwarding SMS (attempt {attempt + 1}): {str(e)}")
                     logger.error("Full error details:", exc_info=True)
                     if attempt < max_retries - 1:  # Don't sleep on last attempt
                         time.sleep(retry_delay)
-                    
-            # Log failed delivery after all retries
-            self.log_sms_delivery(
-                activation_id=activation['activation_id'],
-                sms_text=text,
-                delivery_status='failed'
-            )
             
-            logger.error(f"Failed to forward SMS after {max_retries} attempts")
+            logger.error("Failed to forward SMS after 3 attempts")
             return False
             
         except Exception as e:
-            logger.error(f"Error handling incoming SMS: {e}")
+            logger.error(f"Error in handle_incoming_sms: {e}")
             logger.error("Full error details:", exc_info=True)
             return False
 
