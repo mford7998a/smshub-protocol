@@ -49,9 +49,10 @@ class ModemGUI(ttk.Frame):
         self.server_tab = ttk.Frame(self.notebook)
         self.messages_tab = ttk.Frame(self.notebook)
         self.console_tab = ttk.Frame(self.notebook)  # New console tab
+        self.earnings_tab = ttk.Frame(self.notebook)  # New earnings tab
         
         # Configure tab frames to be resizable
-        for tab in (self.device_tab, self.server_tab, self.messages_tab, self.console_tab):
+        for tab in (self.device_tab, self.server_tab, self.messages_tab, self.console_tab, self.earnings_tab):
             tab.grid_rowconfigure(0, weight=1)
             tab.grid_columnconfigure(0, weight=1)
         
@@ -59,12 +60,14 @@ class ModemGUI(ttk.Frame):
         self.notebook.add(self.server_tab, text="SMS Hub Dashboard")
         self.notebook.add(self.messages_tab, text="Message History")
         self.notebook.add(self.console_tab, text="Console Output")
+        self.notebook.add(self.earnings_tab, text="Earnings")
         
         # Create tab contents
         self.create_device_tab()
         self.create_server_tab()
         self.create_messages_tab()
         self.create_console_tab()  # New method for console tab
+        self.create_earnings_tab()  # New method for earnings tab
         
         # Start update thread
         self.start_update_thread()
@@ -435,7 +438,8 @@ class ModemGUI(ttk.Frame):
         # Create Treeview
         self.devices_tree = ttk.Treeview(frame, columns=(
             "port", "status", "iccid", "network", "phone", "carrier", 
-            "signal", "type", "last_seen"
+            "signal", "type", "last_seen", "total_activations", 
+            "total_earnings", "today_earnings"
         ), show="headings", height=10)
 
         # Define column headings and widths
@@ -448,7 +452,10 @@ class ModemGUI(ttk.Frame):
             ("carrier", "Carrier", 100),
             ("signal", "Signal", 60),
             ("type", "Type", 100),
-            ("last_seen", "Last Seen", 150)
+            ("last_seen", "Last Seen", 150),
+            ("total_activations", "Activations", 100),
+            ("total_earnings", "Total Earnings", 100),
+            ("today_earnings", "Today's Earnings", 100)
         ]
 
         for col_id, heading, width in columns:
@@ -483,45 +490,31 @@ class ModemGUI(ttk.Frame):
 
         # Add devices to treeview
         for port, info in sorted_devices:
-            # Format status with requirements
-            status = info['status']
-            if status != 'active':
-                missing = []
-                if info.get('iccid') in [None, 'Unknown']:
-                    missing.append('SIM')
-                if info.get('network_status') not in ['registered', 'roaming']:
-                    missing.append('Network')
-                if info.get('phone') in [None, 'Unknown']:
-                    missing.append('Phone')
-                if missing:
-                    status += f" ({', '.join(missing)})"
-
-            # Format signal quality
-            signal = info.get('signal_quality', 'Unknown')
-            if signal != 'Unknown':
-                signal = f"{signal}%"
-
-            # Format carrier name
-            carrier = info.get('carrier', 'Unknown')
-            if carrier == '0':
-                carrier = 'Unknown'
-            elif carrier.lower() == 'home':
-                network_status = info.get('network_status', '')
-                carrier = f"Home ({network_status})"
-
-            # Format last seen
-            last_seen = datetime.fromtimestamp(info['last_seen']).strftime('%Y-%m-%d %H:%M:%S')
+            # Get activation stats for this phone number
+            phone = info.get('phone', 'Unknown')
+            if phone != 'Unknown':
+                stats = self.server.activation_logger.get_activations_by_phone(phone)
+                total_activations = stats['total_activations']
+                total_earnings = stats['total_earnings']
+                today_earnings = stats['today_earnings']
+            else:
+                total_activations = 0
+                total_earnings = 0.0
+                today_earnings = 0.0
 
             self.devices_tree.insert("", "end", values=(
                 port,
-                status,
-                "✓" if info.get('iccid') not in [None, 'Unknown'] else "✗",
+                info.get('status', 'Unknown'),
+                info.get('iccid', 'Unknown'),
                 info.get('network_status', 'Unknown'),
-                info.get('phone', 'Unknown'),
-                carrier,
-                signal,
+                phone,
+                info.get('carrier', 'Unknown'),
+                info.get('signal_quality', 'Unknown'),
                 info.get('type', 'Unknown'),
-                last_seen
+                datetime.fromtimestamp(info['last_seen']).strftime('%Y-%m-%d %H:%M:%S'),
+                total_activations,
+                f"${total_earnings:.2f}",
+                f"${today_earnings:.2f}"
             ))
 
         # Update status counts
@@ -537,6 +530,8 @@ class ModemGUI(ttk.Frame):
                     # Update device info and server status
                     self.update_queue.put(self.update_device_info)
                     self.update_queue.put(self.update_server_status)
+                    # Update earnings views
+                    self.update_queue.put(self.update_earnings)
                     
                     # Use the main scan interval setting
                     time.sleep(config.get('scan_interval', 10))
@@ -800,6 +795,22 @@ class ModemGUI(ttk.Frame):
         """Handle modem selection change."""
         self.update_message_history()
 
+    def create_earnings_tab(self):
+        """Create the earnings tab."""
+        # Create earnings tab frame
+        earnings_frame = ttk.Frame(self.earnings_tab)
+        earnings_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
+        
+        # Create earnings sub-tabs
+        self.timeframe_tab = EarningsPage(earnings_frame, self.server)
+        self.service_tab = EarningsPage(earnings_frame, self.server)
+        self.phone_tab = EarningsPage(earnings_frame, self.server)
+        
+        # Configure sub-tabs
+        self.timeframe_tab.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
+        self.service_tab.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
+        self.phone_tab.grid(row=0, column=2, padx=5, pady=5, sticky="nsew")
+
     def run(self):
         """Start the GUI application."""
         # Initial device scan
@@ -807,3 +818,76 @@ class ModemGUI(ttk.Frame):
         
         # Start the main event loop
         self.root.mainloop()
+
+    def update_earnings(self):
+        """Update all earnings views."""
+        try:
+            self.timeframe_tab.update()
+            self.service_tab.update()
+            self.phone_tab.update()
+        except Exception as e:
+            logger.error(f"Error updating earnings views: {e}")
+
+class EarningsPage(ttk.Frame):
+    def __init__(self, parent, server):
+        super().__init__(parent)
+        self.server = server
+        self._create_timeframe_view()
+        self._create_service_view()
+        self._create_phone_view()
+        
+    def _create_timeframe_view(self):
+        frame = ttk.LabelFrame(self, text="Earnings by Time Period")
+        frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
+        
+        self.timeframe_tree = ttk.Treeview(frame, columns=("period", "amount"), show="headings")
+        self.timeframe_tree.heading("period", text="Time Period")
+        self.timeframe_tree.heading("amount", text="Earnings")
+        self.timeframe_tree.grid(row=0, column=0, sticky="nsew")
+        
+    def _create_service_view(self):
+        frame = ttk.LabelFrame(self, text="Earnings by Service")
+        frame.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
+        
+        self.service_tree = ttk.Treeview(frame, columns=("service", "amount"), show="headings")
+        self.service_tree.heading("service", text="Service")
+        self.service_tree.heading("amount", text="Earnings")
+        self.service_tree.grid(row=0, column=0, sticky="nsew")
+        
+    def _create_phone_view(self):
+        frame = ttk.LabelFrame(self, text="Earnings by Phone Number")
+        frame.grid(row=0, column=2, padx=5, pady=5, sticky="nsew")
+        
+        self.phone_tree = ttk.Treeview(frame, columns=("phone", "amount"), show="headings")
+        self.phone_tree.heading("phone", text="Phone Number")
+        self.phone_tree.heading("amount", text="Earnings")
+        self.phone_tree.grid(row=0, column=0, sticky="nsew")
+        
+    def update(self):
+        # Clear existing items
+        for tree in (self.timeframe_tree, self.service_tree, self.phone_tree):
+            for item in tree.get_children():
+                tree.delete(item)
+                
+        # Update timeframe view
+        timeframes = {
+            'Today': 'day',
+            'Last 7 Days': 'week',
+            'Last 30 Days': 'month',
+            'Last Year': 'year',
+            'All Time': 'all'
+        }
+        
+        for label, timeframe in timeframes.items():
+            earnings = self.server.activation_logger.get_earnings_by_timeframe(timeframe)
+            self.timeframe_tree.insert("", "end", values=(label, f"${earnings:.2f}"))
+            
+        # Update service view
+        service_earnings = self.server.activation_logger.get_earnings_by_service()
+        for service, earnings in service_earnings.items():
+            self.service_tree.insert("", "end", values=(service, f"${earnings:.2f}"))
+            
+        # Update phone view
+        phone_earnings = self.server.activation_logger.get_earnings_by_phone()
+        for phone, earnings in phone_earnings.items():
+            self.phone_tree.insert("", "end", values=(phone, f"${earnings:.2f}"))

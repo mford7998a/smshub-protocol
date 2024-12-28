@@ -93,6 +93,8 @@ class SmsHubServer:
         # Initialize routes
         self._init_routes()
         
+        self.load_total_earnings()
+        
     def _init_routes(self):
         """Initialize Flask routes."""
         self.app.route('/', methods=['POST'])(self.handle_request)
@@ -268,7 +270,7 @@ class SmsHubServer:
                 logger.info(f"Activation {activation_id} waiting for SMS")
                 # No action needed, just keep waiting
             elif status == 3:  # Successfully completed
-                self.save_activation(phone, activation['service'], 'completed')
+                self.save_activation(phone, activation['service'], 'successfully_sold')
                 self.stats['completed_activations'] += 1
                 self.stats['total_earnings'] += float(activation.get('sum', 0))
                 logger.info(f"Activation completed: {phone} - {activation['service']}")
@@ -717,3 +719,7 @@ class SmsHubServer:
         except Exception as e:
             logger.error(f"Error logging SMS delivery: {e}")
             logger.error("Full error details:", exc_info=True)
+
+    def load_total_earnings(self):
+        """Initialize total earnings from database"""
+        self.stats['total_earnings'] = self.activation_logger.get_earnings_by_timeframe()

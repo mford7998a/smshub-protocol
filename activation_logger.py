@@ -378,3 +378,61 @@ class ActivationLogger:
         except Exception as e:
             logger.error(f"Error searching activations: {e}")
             return [] 
+
+    def get_earnings_by_timeframe(self, timeframe='all'):
+        """Calculate earnings for different timeframes"""
+        now = datetime.now()
+        query = "SELECT SUM(sum_amount) FROM activations WHERE status = 'successfully_sold'"
+        
+        if timeframe == 'day':
+            query += " AND date(created_at) = date('now')"
+        elif timeframe == 'week':
+            query += " AND created_at >= datetime('now', '-7 days')"
+        elif timeframe == 'month':
+            query += " AND created_at >= datetime('now', '-30 days')"
+        elif timeframe == 'year':
+            query += " AND created_at >= datetime('now', '-365 days')"
+        
+        with self._get_db_connection() as conn:
+            result = conn.execute(query).fetchone()[0]
+            return result or 0.0
+
+    def get_earnings_by_service(self):
+        """Calculate total earnings per service"""
+        query = """
+        SELECT service, SUM(sum_amount) as total
+        FROM activations 
+        WHERE status = 'successfully_sold'
+        GROUP BY service
+        """
+        with self._get_db_connection() as conn:
+            return dict(conn.execute(query).fetchall())
+
+    def get_earnings_by_phone(self):
+        """Calculate total earnings per phone number"""
+        query = """
+        SELECT phone_number, SUM(sum_amount) as total
+        FROM activations 
+        WHERE status = 'successfully_sold'
+        GROUP BY phone_number
+        """
+        with self._get_db_connection() as conn:
+            return dict(conn.execute(query).fetchall())
+
+    def get_activations_by_phone(self, phone_number):
+        """Get total activations and earnings for a specific phone number"""
+        query = """
+        SELECT 
+            COUNT(*) as total_activations, 
+            SUM(sum_amount) as total_earnings,
+            SUM(CASE WHEN date(created_at) = date('now') THEN sum_amount ELSE 0 END) as today_earnings
+        FROM activations 
+        WHERE phone_number = ? AND status = 'successfully_sold'
+        """
+        with self._get_db_connection() as conn:
+            result = conn.execute(query, (phone_number,)).fetchone()
+            return {
+                'total_activations': result[0] or 0,
+                'total_earnings': result[1] or 0.0,
+                'today_earnings': result[2] or 0.0
+            } 
