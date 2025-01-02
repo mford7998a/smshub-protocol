@@ -134,13 +134,22 @@ class SmsHubServer:
     def handle_get_number(self, data):
         """Handle GET_NUMBER request."""
         try:
+            logger.info("=" * 80)
+            logger.info("INCOMING REQUEST: GET_NUMBER")
+            logger.info(f"Request Data: {json.dumps(data, indent=2)}")
+            logger.info("-" * 80)
+
             # Validate required fields
             service = data.get('service')
             if not service:
-                return jsonify({
+                error_response = {
                     'status': 'ERROR',
                     'error': 'Missing service'
-                })
+                }
+                logger.error(f"Validation Error: {error_response['error']}")
+                logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+                logger.info("=" * 80)
+                return jsonify(error_response)
                 
             # Store original service code exactly as received
             service_code = service  # Don't modify the service code
@@ -148,13 +157,17 @@ class SmsHubServer:
             # Check if service is enabled in config
             if not config.get('services', {}).get(service_code, False):
                 logger.error(f"Service not enabled in config: {service_code}")
-                return jsonify({
+                error_response = {
                     'status': 'ERROR',
                     'error': f'Service not available: {service_code}'
-                })
+                }
+                logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+                logger.info("=" * 80)
+                return jsonify(error_response)
                 
             # Handle exception phone set
             exception_phones = data.get('exceptionPhoneSet', [])
+            logger.info(f"Exception phones: {exception_phones}")
             
             # Find available number
             available_port = None
@@ -187,16 +200,20 @@ class SmsHubServer:
                 break
                 
             if not available_port or not available_phone:
-                return jsonify({
-                    'status': 'NO_NUMBERS'
-                })
+                no_numbers_response = {'status': 'NO_NUMBERS'}
+                logger.info("No available numbers found")
+                logger.info(f"Response: {json.dumps(no_numbers_response, indent=2)}")
+                logger.info("=" * 80)
+                return jsonify(no_numbers_response)
                 
             # Generate activation ID
             activation_id = int(time.time() * 1000)
+            logger.info(f"Generated activation ID: {activation_id}")
             
             # Update modem status
             self.modems[available_port]['status'] = 'busy'
             self.modems[available_port]['activation_id'] = activation_id
+            logger.info(f"Updated modem status - Port: {available_port}, Status: busy")
             
             # Store activation with original service code
             self.active_numbers[available_phone] = {
@@ -206,136 +223,114 @@ class SmsHubServer:
                 'sum': data.get('sum', 0),
                 'port': available_port  # Store port for reference
             }
+            logger.info(f"Stored activation data for phone: {available_phone}")
             
             # Update stats
             self.stats['total_activations'] += 1
             
             # Return phone number without + prefix as required by API
-            return jsonify({
+            success_response = {
                 'status': 'SUCCESS',
                 'number': available_phone.lstrip('+'),
                 'activationId': activation_id
-            })
+            }
+            logger.info(f"Response: {json.dumps(success_response, indent=2)}")
+            logger.info("=" * 80)
+            return jsonify(success_response)
             
         except Exception as e:
             logger.error(f"Error in get_number: {e}", exc_info=True)
-            return jsonify({
+            error_response = {
                 'status': 'ERROR',
                 'error': 'Internal Server Error'
-            })
+            }
+            logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+            logger.info("=" * 80)
+            return jsonify(error_response)
 
     def handle_finish_activation(self, data):
         """Handle FINISH_ACTIVATION request."""
         try:
-            # Validate required fields
+            logger.info("=" * 80)
+            logger.info("INCOMING REQUEST: FINISH_ACTIVATION")
+            logger.info(f"Request Data: {json.dumps(data, indent=2)}")
+            logger.info("-" * 80)
+
             activation_id = data.get('activationId')
             status = data.get('status')
-
-            if not isinstance(activation_id, (int, float)) or not isinstance(status, (int, float)):
-                return jsonify({
-                    'status': 'ERROR',
-                    'error': 'Invalid field types'
-                })
-
-            # Find the activation by ID
-            port = None
-            phone = None
-            # First check active numbers
-            for p_num, activation in self.active_numbers.items():
-                if activation.get('activation_id') == activation_id:
-                    phone = p_num
-                    port = activation.get('port')
-                    break
-
-            # If not found in active numbers, check completed activations
-            if not phone:
-                for p_num, services in self.completed_activations.items():
-                    if any(s.get('activation_id') == activation_id for s in services.values()):
-                        return jsonify({'status': 'SUCCESS'})  # Already completed
-                return jsonify({
-                    'status': 'ERROR',
-                    'error': 'Activation not found'
-                })
-
-            activation = self.active_numbers.get(phone)
-            if not activation:
-                # If no active activation but phone exists, it was likely already completed
-                return jsonify({'status': 'SUCCESS'})
-
-            # Log status change
-            self.log_activation_status(activation_id, status, phone)
-
-            # Update activation status based on status code
-            if status == 1:  # Waiting for SMS
-                logger.info(f"Activation {activation_id} waiting for SMS")
-                # No action needed, just keep waiting
-            elif status == 3:  # Successfully completed
-                self.save_activation(phone, activation['service'], 'successfully_sold')
-                self.stats['completed_activations'] += 1
-                self.stats['total_earnings'] += float(activation.get('sum', 0))
-                logger.info(f"Activation completed: {phone} - {activation['service']}")
-                
-                # Update service stats
-                service = activation['service']
-                if service not in self.stats['service_stats']:
-                    self.stats['service_stats'][service] = {'completed': 0, 'cancelled': 0, 'refunded': 0}
-                self.stats['service_stats'][service]['completed'] += 1
-                
-                # Calculate and store activation time
-                activation_time = time.time() - activation['timestamp']
-                self.stats['activation_times'].append(activation_time)
-                
-                # Clean up
-                self.active_numbers.pop(phone, None)
-                if port and port in self.modems:
-                    self.modems[port]['status'] = 'active'
-                    self.modems[port].pop('activation_id', None)
-                
-            elif status == 8:  # Cancelled by user
-                logger.info(f"Activation cancelled: {phone} - {activation['service']}")
-                self.stats['cancelled_activations'] += 1
-                
-                # Update service stats
-                service = activation['service']
-                if service not in self.stats['service_stats']:
-                    self.stats['service_stats'][service] = {'completed': 0, 'cancelled': 0, 'refunded': 0}
-                self.stats['service_stats'][service]['cancelled'] += 1
-                
-                # Clean up
-                self.active_numbers.pop(phone, None)
-                if port and port in self.modems:
-                    self.modems[port]['status'] = 'active'
-                    self.modems[port].pop('activation_id', None)
-                
-            elif status == 10:  # Refunded
-                logger.info(f"Activation refunded: {phone} - {activation['service']}")
-                self.stats['refunded_activations'] += 1
-                
-                # Update service stats
-                service = activation['service']
-                if service not in self.stats['service_stats']:
-                    self.stats['service_stats'][service] = {'completed': 0, 'cancelled': 0, 'refunded': 0}
-                self.stats['service_stats'][service]['refunded'] += 1
-                
-                # Clean up
-                self.active_numbers.pop(phone, None)
-                if port and port in self.modems:
-                    self.modems[port]['status'] = 'active'
-                    self.modems[port].pop('activation_id', None)
             
+            if not activation_id or status is None:
+                error_response = {
+                    'status': 'ERROR',
+                    'error': 'Missing required fields'
+                }
+                logger.error("Missing required fields in finish activation request")
+                logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+                logger.info("=" * 80)
+                return jsonify(error_response)
+                
+            # Find the phone number for this activation
+            found_phone = None
+            found_port = None
+            
+            for phone, activation in self.active_numbers.items():
+                if activation.get('activation_id') == activation_id:
+                    found_phone = phone
+                    found_port = activation.get('port')
+                    break
+                    
+            if not found_phone:
+                logger.warning(f"No active number found for activation ID: {activation_id}")
+                success_response = {'status': 'SUCCESS'}  # Still return success per protocol
+                logger.info(f"Response: {json.dumps(success_response, indent=2)}")
+                logger.info("=" * 80)
+                return jsonify(success_response)
+                
+            # Handle the activation status
+            if status == 8:  # Activation complete
+                logger.info(f"Activation {activation_id} completed successfully")
+                if found_port and found_port in self.modems:
+                    self.modems[found_port]['status'] = 'active'
+                    logger.info(f"Reset modem status to active for port: {found_port}")
+                if found_phone in self.active_numbers:
+                    del self.active_numbers[found_phone]
+                    logger.info(f"Removed activation for phone: {found_phone}")
+                    
+            elif status == 3:  # SMS received successfully
+                logger.info(f"SMS received successfully for activation {activation_id}")
+                
+            elif status == 1:  # Waiting for SMS
+                logger.info(f"Waiting for SMS for activation {activation_id}")
+                
+            elif status == 2:  # SMS code not valid
+                logger.warning(f"SMS code not valid for activation {activation_id}")
+                
+            elif status == 4:  # Timeout
+                logger.warning(f"Timeout for activation {activation_id}")
+                if found_port and found_port in self.modems:
+                    self.modems[found_port]['status'] = 'active'
+                    logger.info(f"Reset modem status to active for port: {found_port}")
+                if found_phone in self.active_numbers:
+                    del self.active_numbers[found_phone]
+                    logger.info(f"Removed activation for phone: {found_phone}")
+                    
             else:
                 logger.warning(f"Received unknown status code: {status} for activation {activation_id}")
             
-            return jsonify({
-                'status': 'SUCCESS'
-            })
+            success_response = {'status': 'SUCCESS'}
+            logger.info(f"Response: {json.dumps(success_response, indent=2)}")
+            logger.info("=" * 80)
+            return jsonify(success_response)
 
         except Exception as e:
             logger.error(f"Error in finish_activation: {e}", exc_info=True)
-            return jsonify({
+            error_response = {
                 'status': 'ERROR',
                 'error': 'Internal Server Error'
-            })
+            }
+            logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+            logger.info("=" * 80)
+            return jsonify(error_response)
 
     def save_activation(self, phone: str, service: str, status: str):
         """Save activation to history file."""
@@ -375,50 +370,54 @@ class SmsHubServer:
     def handle_push_sms(self, data):
         """Handle PUSH_SMS request."""
         try:
+            logger.info("=" * 80)
+            logger.info("INCOMING REQUEST: PUSH_SMS")
+            logger.info(f"Request Data: {json.dumps(data, indent=2)}")
+            logger.info("-" * 80)
+
             sms_id = data.get('smsId')
             phone = data.get('phone')
             phone_from = data.get('phoneFrom')
             text = data.get('text')
 
             if not all([sms_id, phone, phone_from, text]):
-                return jsonify({
+                error_response = {
                     'status': 'ERROR',
                     'error': 'Missing required fields'
-                })
+                }
+                logger.error("Missing required fields in push SMS request")
+                logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+                logger.info("=" * 80)
+                return jsonify(error_response)
 
             # Validate types
             if not isinstance(sms_id, (int, float)) or not isinstance(phone, (int, float)):
-                return jsonify({
+                error_response = {
                     'status': 'ERROR',
                     'error': 'Invalid field types'
-                })
-            if not isinstance(phone_from, str):
-                return jsonify({
-                    'status': 'ERROR',
-                    'error': 'Invalid field types'
-                })
-            if not isinstance(text, str):
-                return jsonify({
-                    'status': 'ERROR',
-                    'error': 'Invalid field types'
-                })
-
-            # Log the SMS
-            logger.info(f"Received SMS - ID: {sms_id}, From: {phone_from}, To: {phone}, Text: {text}")
+                }
+                logger.error("Invalid field types in push SMS request")
+                logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+                logger.info("=" * 80)
+                return jsonify(error_response)
 
             # Find active activation for this phone number
             str_phone = str(phone)
             activation = self.active_numbers.get(str_phone)
             if not activation:
                 logger.warning(f"Received SMS for unknown activation: {phone}")
-                return jsonify({
+                error_response = {
                     'status': 'ERROR',
                     'error': 'No active activation found for this number'
-                })
+                }
+                logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+                logger.info("=" * 80)
+                return jsonify(error_response)
 
             # Forward SMS to SMSHUB immediately
             try:
                 if self.smshub:  # Make sure smshub client is initialized
+                    logger.info("Forwarding SMS to SMSHUB")
                     response = self.smshub.push_sms(
                         sms_id=sms_id,
                         phone=phone,  # Already validated as int
@@ -427,33 +426,46 @@ class SmsHubServer:
                     )
                     if response:
                         logger.info(f"Successfully forwarded SMS to SMSHUB - ID: {sms_id}")
-                        return jsonify({
-                            'status': 'SUCCESS'
-                        })
+                        success_response = {'status': 'SUCCESS'}
+                        logger.info(f"Response: {json.dumps(success_response, indent=2)}")
+                        logger.info("=" * 80)
+                        return jsonify(success_response)
                     else:
-                        logger.error(f"Failed to forward SMS to SMSHUB - ID: {sms_id}, Response: {response}")
-                        return jsonify({
+                        logger.error(f"Failed to forward SMS to SMSHUB - ID: {sms_id}")
+                        error_response = {
                             'status': 'ERROR',
                             'error': 'Failed to forward SMS'
-                        })
+                        }
+                        logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+                        logger.info("=" * 80)
+                        return jsonify(error_response)
                 else:
                     logger.error("SMSHUB client not initialized")
-                    return jsonify({
+                    error_response = {
                         'status': 'ERROR',
                         'error': 'SMSHUB client not initialized'
-                    })
+                    }
+                    logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+                    logger.info("=" * 80)
+                    return jsonify(error_response)
             except Exception as e:
                 logger.error(f"Error forwarding SMS to SMSHUB: {e}", exc_info=True)
-                return jsonify({
+                error_response = {
                     'status': 'ERROR',
                     'error': 'Internal Server Error'
-                })
+                }
+                logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+                logger.info("=" * 80)
+                return jsonify(error_response)
         except Exception as e:
             logger.error(f"Error in push_sms: {e}", exc_info=True)
-            return jsonify({
+            error_response = {
                 'status': 'ERROR',
                 'error': 'Internal Server Error'
-            })
+            }
+            logger.info(f"Response: {json.dumps(error_response, indent=2)}")
+            logger.info("=" * 80)
+            return jsonify(error_response)
 
     def register_modem(self, key: str, modem_info: dict):
         """Register a modem with the server."""
