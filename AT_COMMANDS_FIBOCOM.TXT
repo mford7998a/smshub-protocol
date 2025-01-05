@@ -1,0 +1,447 @@
+
+1. AT+CLAC: Lists all supported AT commands.
+2. ATS: Sets or reads the value of an S-register.
+3. ATD: Initiates a call or establishes a connection (e.g., dial a number).
+4. ATA: Answers an incoming call.
+5. ATO: Resumes a call or session placed on hold.
+6. ATE: Enables or disables the echo of characters in command mode.
+7. ATH: Terminates a call or session.
+8. ATV: Sets response format (numeric or verbose).
+9. ATZ: Resets the modem to its default configuration.
+10. ATL: Adjusts the speaker volume (if supported).
+11. ATM: Sets speaker mode (e.g., off, on until carrier detected).
+12. ATI: Provides modem identification information.
+13. ATQ: Controls result code suppression (on or off).
+14. ATX: Configures result code options (e.g., for dial tone detection).
+15. AT&F: Restores the modem to factory default settings.
+16. AT&D: Configures DTR (Data Terminal Ready) signal behavior.
+17. AT&C: Sets the state of the carrier detect (CD) signal.
+18. AT\Q: Configures flow control options.
+19. AT+CMER: Configures mobile equipment event reporting.
+20. AT+CGSMS: Selects the preferred SMS service (e.g., GSM, GPRS).
+21. AT+CMGD: Deletes SMS messages from the memory.
+22. AT+CMGF: Sets SMS message format (text or PDU mode).
+23. AT+CMGL: Lists SMS messages from memory.
+24. AT+CMGR: Reads an SMS message from memory.
+25. AT+CMGS: Sends an SMS message.
+26. AT+CMGW: Writes an SMS message to memory.
+27. AT+CMMS: Configures more messages to send (concatenated SMS).
+28. AT+CMSS: Sends an SMS message from storage.
+29. AT+CNMA: Sends a new message acknowledgment.
+30. AT+CNMI: Configures how incoming SMS notifications are handled.
+31. AT+CPMS: Selects SMS message storage.
+32. AT+CSCA: Sets or queries the SMS service center address.
+33. AT+CSCB: Enables or disables cell broadcast message types.
+34. AT+CSMS: Configures SMS service preferences.
+35. AT+CNEM: Configures SMS network event monitoring.
+36. AT+XSMSFDN: Manages SMS fixed dialing numbers.
+37. AT+XCMAS: Configures additional SMS settings.
+38. AT+XCSSMS: Configures custom SMS settings.
+39. AT+XSMS: Configures extended SMS settings.
+40. AT+XTESM: Configures test SMS message parameters.
+41. AT+CSDH: Displays detailed SMS header information.
+42. AT+CMGC: Sends SMS command messages.
+43. AT+CSMP: Configures SMS message parameters.
+44. AT+CGREG: Reports GPRS network registration status.
+45. AT+COPN: Lists operator names from the operator list.
+46. AT+COPS: Manages network operator selection.
+47. AT+CREG: Reports network registration status.
+48. AT+XCOPS: Provides extended network operator selection.
+49. AT+XCSPAGING: Configures paging parameters for the network.
+50. AT+XEONS: Enables or disables eONS (enhanced Operator Name String) functionality.
+51. AT+XINEM: Configures or queries the In-Emergency Mode settings.
+52. AT+XREG: Reports network registration details or status.
+53. AT+XAACOPS: Configures advanced operator selection.
+54. AT+XACT: Manages specific network activation procedures.
+55. AT+WS46: Selects wireless network stack or access technology.
+56. AT+CEREG: Reports EPS (Evolved Packet System) network registration status.
+57. AT+CEMODE: Configures or queries EPS network operation modes.
+58. AT+CPLS: Selects preferred PLMN (Public Land Mobile Network) list.
+59. AT+CPOL: Configures or queries the operator selection priority list.
+60. AT+XHOMEZR: Configures or queries home zone-related settings.
+61. AT+XCSG: Configures or queries cell selection group parameters.
+62. AT+CIREP: Configures unsolicited CREG or CEREG network event reporting.
+63. AT+XCSQ: Provides signal quality and network service parameters.
+64. AT+XSYSERR: Displays system error codes and related diagnostics.
+65. AT+XCSFB: Configures or queries circuit-switched fallback settings.
+66. AT+XDAMCFG: Configures Dual Active Mode settings.
+67. AT+XCMI: Manages call management interface settings.
+68. AT+XCMIEXT: Extends call management interface configuration.
+69. AT+XNIMTC: Configures or queries Network Initiated Mobile Terminating Calls settings.
+70. AT+XSIB16INFO: Provides information on SIM-based 16-bit identifiers.
+71. AT+XIMSIREG: Manages IMS (IP Multimedia Subsystem) registration status.
+72. AT+XMCI: Configures multi-call interface settings.
+73. AT+XLNWC: Configures or queries local network control settings.
+74. AT+XTIMER: Configures or queries network timer values.
+75. AT+CHUP: Hangs up an ongoing call.
+76. AT+CMOD: Configures call mode settings.
+77. AT+CMUT: Mutes or unmutes the current call.
+78. AT+CTFR: Transfers an active call to another number.
+79. AT+VTS: Sends DTMF tones during a call.
+80. AT+XCALLSTAT: Reports detailed call status information.
+81. AT+XSPEECHCONFIG: Configures speech codec and related parameters.
+82. AT+XDTMF: Configures or queries DTMF tone settings.
+83. AT+XVTS: Sends virtual DTMF tones.
+84. AT+CSTA: Configures call setup address type.
+85. AT+CVHU: Configures call hang-up behavior.
+86. AT+VTD: Configures tone dialing parameters.
+87. AT+CCWE: Configures call waiting enable/disable settings.
+88. AT+CR: Enables or disables service reporting.
+89. AT+CRC: Configures or queries cellular result codes.
+90. AT+XPROGRESS: Provides call progress indications.
+91. AT+XREDIAL: Configures or queries automatic redial settings.
+92. AT+XLIN: Configures line interface behavior for calls.
+93. AT+CAOC: Provides advice of charge information for calls.
+94. AT^DSCI: Sends specific device system commands.
+95. AT^SYSINFO: Provides detailed system information (e.g., RAT, SIM status).
+96. AT^SYSCONFIG: Configures system mode and band preferences.
+97. AT+XCCWA: Configures call waiting notifications.
+98. AT+CCFC: Manages call forwarding settings.
+99. AT+CCWA: Enables or disables call waiting services.
+100. AT+CHLD: Manages held calls and multi-party calling options.
+101. AT+CLCC: Lists current calls and their statuses.
+102. AT+CLCK: Configures or queries facility locks (e.g., SIM lock, network lock).
+103. AT+CLIP: Enables or disables calling line identification presentation.
+104. AT+CLIR: Configures or queries calling line identification restriction.
+105. AT+CNAP: Displays the calling name presentation information.
+106. AT+COLP: Enables or disables connected line identification presentation.
+107. AT+COLR: Displays connected line identification restriction information.
+108. AT+CPWD: Changes passwords for various facility locks.
+109. AT+CSSN: Configures supplementary service notifications.
+110. AT+CUSD: Sends or receives unstructured supplementary service data (USSD).
+111. AT+CCUG: Configures or queries closed user group settings.
+112. AT+CBST: Configures bearer service type for data calls.
+113. AT+CEER: Provides extended error reports for the last failed operation.
+114. AT+CGACT: Activates or deactivates PDP (Packet Data Protocol) contexts.
+115. AT+CGATT: Attaches or detaches from the GPRS network.
+116. AT+CGAUTO: Enables or disables automatic GPRS attachment.
+117. AT+CGCLASS: Configures GPRS mobile station class (e.g., A, B, C).
+118. AT+CGDCONT: Configures PDP context definitions.
+119. AT+CGDSCONT: Configures secondary PDP context definitions.
+120. AT+CGEQMIN: Configures minimum acceptable quality of service parameters.
+121. AT+CGEQREQ: Configures requested quality of service parameters.
+122. AT+CGEQNEG: Displays negotiated quality of service parameters.
+123. AT+CGCMOD: Modifies existing PDP contexts.
+124. AT+CGDATA: Establishes a GPRS data connection.
+125. AT+CGPADDR: Displays PDP addresses assigned by the network.
+126. AT+CGANS: Answers an incoming GPRS call.
+127. AT+CGCONTRDP: Reads PDP context parameters for active contexts.
+128. AT+CGSCONTRDP: Reads secondary PDP context parameters.
+129. AT+CGTFTRDP: Reads traffic flow template parameters.
+130. AT+CGEQOSRDP: Reads quality of service parameters for active contexts.
+131. AT+CGEREP: Configures GPRS event reporting.
+132. AT+CGQMIN: Configures minimum acceptable quality of service for GPRS.
+133. AT+CGQREQ: Configures requested quality of service for GPRS.
+134. AT+CGTFT: Configures traffic flow templates for PDP contexts.
+135. AT+XCGTFT: Configures extended traffic flow templates.
+136. AT+CIPCA: Configures IP control and access settings.
+137. AT+XCGCLASS: Configures extended GPRS class settings.
+138. AT+XDNS: Configures or queries DNS settings.
+139. AT+XGAUTH: Configures GPRS authentication parameters.
+140. AT+CSCON: Reports signaling connection status.
+141. AT+XCSCON: Reports extended signaling connection status.
+142. AT+XIMSCONFIG: Configures IMS (IP Multimedia Subsystem) settings.
+143. AT+XMULTISLOT: Configures multi-slot class settings for GPRS.
+144. AT+XGCNTRD: Reads GPRS counter values for data usage monitoring.
+145. AT+FCLASS: Configures fax class settings for data transmission.
+146. AT+CRLP: Configures or queries radio link protocol settings.
+147. AT+CGEQOS: Configures quality of service for EPS bearers.
+148. AT+XPCO: Configures protocol configuration options.
+149. AT+XOMADM: Configures OMA Device Management settings.
+150. AT+VZWAPNE: Configures Verizon Wireless-specific APN settings.
+151. AT+XOMADMREP: Sends OMA Device Management report data.
+152. AT+XOMADMALERT: Handles OMA Device Management alerts.
+153. AT+XMULTISIM: Configures or queries multi-SIM settings.
+154. AT+XDATACONTROL: Configures data control and traffic settings.
+155. AT+XNVMPLMN: Reads or writes preferred PLMN settings in non-volatile memory.
+156. AT+XNVMMCC: Reads or writes mobile country code settings in non-volatile memory.
+157. AT+CCID: Retrieves the integrated circuit card identifier (ICCID) of the SIM.
+158. AT+CCLK: Configures or queries the real-time clock.
+159. AT+CFUN: Configures or queries the functionality level of the modem.
+160. AT+CIMI: Retrieves the international mobile subscriber identity (IMSI).
+161. AT+CMEE: Configures the reporting of error messages (numeric or verbose).
+162. AT+CMUX: Enables or disables the CMUX protocol for multiplexing.
+163. AT+CNUM: Retrieves the subscriber number(s) from the SIM card.
+164. AT+CPIN: Manages PIN entry for SIM card access.
+165. AT+CPWROFF: Powers off the modem.
+166. AT+CSIM: Sends a SIM application toolkit command.
+167. AT+CRSM: Sends a restricted SIM access command.
+168. AT+CSCS: Configures the character set for SMS and other text-based operations.
+169. AT+CSVM: Manages voicemail service activation and notifications.
+170. AT+IPR: Configures the baud rate for communication with the modem.
+171. AT+XCTMS: Configures or queries specific connectivity-related timers.
+172. AT+XGENDATA: Generates test data for diagnostic purposes.
+173. AT+XPINCNT: Reports the PIN entry attempt counter.
+174. AT+XGATR: Reads or writes GPRS-related timer values.
+175. AT+XLOG: Configures or queries logging settings for the modem.
+176. AT+CMMIVT: Configures or queries modem multimedia information.
+177. AT+CPINR: Reads the current PIN retry count.
+178. AT+CESQ: Reports signal quality and coverage estimates.
+179. AT+XCESQ: Reports extended signal quality parameters.
+180. AT+CTZU: Enables or disables time zone updates via the network.
+181. AT+CTZR: Reports the current time zone information.
+182. AT+CMOLR: Manages mobile-originated location requests.
+183. AT+CMTLR: Manages mobile-terminated location requests.
+184. AT+XCESQRC: Configures or queries extended signal quality report criteria.
+185. AT+XMER: Configures or queries modem event reporting settings.
+186. AT+XSIMSTATE: Reports the current SIM state (e.g., ready, not inserted).
+187. AT+XSYSCHANGEIND: Configures system change indication notifications.
+188. AT+CIND: Configures or queries indicator status (e.g., battery level, signal strength).
+189. AT+CSUS: Suspends or resumes supplementary service operations.
+190. AT+XSIO: Configures or queries I/O pin behavior and functionality.
+191. AT+XDLCTEST: Runs diagnostic loopback tests.
+192. AT+XPOW: Configures or queries power management settings.
+193. AT+XCEER: Provides detailed error information for specific modem failures.
+194. AT+XEER: Provides extended error reporting.
+195. AT+XMUX: Configures or queries advanced multiplexing settings.
+196. AT+XFDOR: Configures or queries factory default operation reset settings.
+197. AT+XISMSCFG: Configures IMS-specific SMS settings.
+198. AT+XMMTELSTAT: Reports multimedia telephony status information.
+199. AT+CSSAC: Configures or queries supplementary service access control settings.
+200. AT+XICFG: Configures or queries interface configuration settings.
+201. AT+XIREG: Reports IMS (IP Multimedia Subsystem) registration status.
+202. AT+CIREG: Reports EPS network registration status.
+203. AT+XIREGINFO: Provides detailed IMS registration information.
+204. AT+CISRVCC: Enables or disables Single Radio Voice Call Continuity (SRVCC).
+205. AT+XISRVCC: Configures or queries IMS SRVCC settings.
+206. AT+XCMGS3GPP2: Sends an SMS in 3GPP2 format.
+207. AT+XCMT3GPP2: Sends an MMS in 3GPP2 format.
+208. AT+XICMGSMODE: Configures or queries interconnection modes for GSM/IMS.
+209. AT+VZWRSRP: Reports RSRP (Reference Signal Received Power) for Verizon.
+210. AT+VZWRSRQ: Reports RSRQ (Reference Signal Received Quality) for Verizon.
+211. AT+XCONFIG: Configures advanced modem settings.
+212. AT+XAPP: Configures application-specific parameters.
+213. AT+XHSDUPA: Configures High-Speed Downlink and Uplink Packet Access settings.
+214. AT+XCAP: Configures or queries IMS capability settings.
+215. AT+XFDSLEEP: Configures modem sleep and power-saving modes.
+216. AT+CAVIMS: Queries active IMS voice sessions.
+217. AT+CASIMS: Queries active IMS supplementary services.
+218. AT+XLDRAPNE: Configures APN (Access Point Name) settings for the loader.
+219. AT+XLDR: Initiates firmware loading or updates.
+220. AT+CVDP: Configures or queries VoLTE (Voice over LTE) and data path settings.
+221. AT+CEVDP: Configures or queries Enhanced Voice and Data Path settings.
+222. AT+XVDP: Configures extended voice and data path parameters.
+223. AT+XETWCFG: Configures ETWS (Earthquake and Tsunami Warning System) settings.
+224. AT+XETWNTFYSTART: Starts ETWS notifications.
+225. AT+XETWNTFYSTOP: Stops ETWS notifications.
+226. AT+XMETRIC: Provides network performance and metric data.
+227. AT+XCIQ: Configures Carrier IQ reporting.
+228. AT+XNRTAPP: Configures network-related application settings.
+229. AT+XNRTCWS: Configures network-related circuit-switching settings.
+230. AT+CAMM: Manages call and media configurations.
+231. AT+CACM: Configures and queries call accounting and monitoring.
+232. AT+XDATACHANNEL: Configures dedicated data channels.
+233. AT+CPIN2: Manages PIN2 entry for SIM functionality.
+234. AT+CONNECTPORT: Configures data connection port settings.
+235. AT+CCHO: Opens a logical channel to the SIM.
+236. AT+CCHC: Closes a logical channel to the SIM.
+237. AT+XCSP: Configures circuit-switched protocol parameters.
+238. AT+NEER: Provides detailed network error reporting.
+239. AT+CUAD: Configures user authentication data for network connections.
+240. AT+CEAP: Manages EAP (Extensible Authentication Protocol) settings.
+241. AT+CERP: Configures or queries Enhanced Routing Protocol settings.
+242. AT+XUICC: Manages UICC (Universal Integrated Circuit Card) features.
+243. AT+XLEMA: Configures LE-MO (Low Energy Mobile Originated) messaging.
+244. AT+XAUTH: Manages authentication credentials.
+245. AT+CEN: Configures or queries emergency number lists.
+246. AT+XSYSTRACE: Configures system tracing and debugging.
+247. AT+XDBGCONF: Configures advanced debugging options.
+248. AT+XABBTRACE: Configures ABB (Analog Baseband) tracing.
+249. AT+CLAC: Lists all supported AT commands.
+250. AT+CPUC: Configures phone unlock codes.
+251. AT+CLAN: Configures or queries LAN-related settings.
+252. AT+CGLA: Sends an APDU (Application Protocol Data Unit) command to the SIM.
+253. AT+CRLA: Configures or queries remote LAN access.
+254. AT+CPAS: Reports the phone activity status.
+255. AT+SETLITRACE: Configures Lite tracing settings for low-level debugging.
+256. AT+XSVM: Manages supplementary voice services.
+257. AT+XNOTIFYDUNSTATUS: Reports DUN (Dial-Up Networking) status changes.
+258. AT+XRXDIV: Configures or queries RX diversity settings.
+259. AT+XRXDIV3GRAB: Configures 3G RX diversity grab settings.
+260. AT+XMAGETKEY: Retrieves a key from a secure storage module.
+261. AT+XMAGETBLOCK: Retrieves a data block from secure storage.
+262. AT+XTSM: Configures TSM (Trusted Service Manager) parameters.
+263. AT+XTAMR: Configures AMR (Adaptive Multi-Rate) codec settings.
+264. AT+XADPCLKFREQINFO: Provides advanced clock frequency information.
+265. AT+GTMCFWVER: Retrieves firmware version information.
+266. AT+GTPKGVER: Retrieves package version information.
+267. AT+GTMCPKGVER: Retrieves MCP (Modem Control Package) version.
+268. AT+GTCFGELEMVER: Retrieves configuration element version information.
+269. AT+GTUSBMODE: Configures USB operation modes.
+270. AT+GTCPUTYPE: Reports CPU type used by the modem.
+271. AT+GTFWVERSION_MR6: Retrieves firmware version for MR6 builds.
+272. AT+XLGTEST: Runs loopback tests for the modem.
+273. AT+XLGINFO: Reports loopback test information.
+274. AT%GPS: Configures or queries GPS functionality.
+275. AT+XLCSLSR: Configures location-based services settings.
+276. AT+XLSRSTOP: Stops location-based service operations.
+277. AT+XLTC: Configures LTE-related parameters.
+278. AT+XLOMR: Configures location-based operational mode parameters.
+279. AT+XLCSLRMT: Configures remote location-based service parameters.
+280. AT+XLCSLRV: Configures location-based service retransmission parameters.
+281. AT+XLCSLQOS: Configures QoS (Quality of Service) for location-based services.
+282. AT+XLICLS: Configures client location services settings.
+283. AT+XLCSSLP: Configures secure location protocol settings.
+284. AT+XLICLP: Configures client location protocol parameters.
+285. AT+XLCSLUI: Configures location-based user interface settings.
+286. AT+XLCSTER: Configures location service error reporting.
+287. AT+XLGASSIST: Configures assisted location settings.
+288. AT+XLGNVRAM: Manages location-related NVRAM (non-volatile memory) data.
+289. AT+XLCSSHUTDOWN: Shuts down location services.
+290. AT%XLCSTEST: Runs tests for location-based services.
+291. AT+XLCSSUPLVER: Queries SUPL (Secure User Plane Location) version.
+292. AT+XLCSLSTR: Configures location service transfer parameters.
+293. AT+XLCSSUPLAPPID: Configures SUPL application IDs.
+294. AT+XLCSAETTA: Configures emergency location transfer settings.
+295. AT+XLCSTTTPLR: Configures location transfer retry parameters.
+296. AT+XLCSTPLR: Configures location transfer loss recovery parameters.
+297. AT+XLCSINIT: Initializes location service settings.
+298. AT+XLCSSTOREAPN: Stores APN settings for location services.
+299. AT+IHVLSR: Configures IHVL (In-House Verification Lab) location settings.
+300. AT+IHVLSRS: Configures IHVL location-related supplementary services.
+301. AT+XLCSSWITCH: Switches between different location service configurations.
+302. AT+GTLCSCONFIG: Configures location services settings.
+303. AT+GTSLPSERVER: Configures SUPL server details for location services.
+304. AT+GTSLPTLC: Configures SUPL transport layer client settings.
+305. AT+GTSLPTLSEN: Enables or disables SUPL transport layer security.
+306. AT+GTSLPVER: Queries SUPL protocol version.
+307. AT+XLGTSR: Configures SUPL-related general settings.
+308. AT+CPOS: Queries current position using GPS or other location services.
+309. AT+XLSRSTOP: Stops location service reporting.
+310. AT+CPOSR: Queries or reports periodic location updates.
+311. AT+CMTLRA: Configures mobile-terminated location request acknowledgment.
+312. AT+XCPOSR: Configures extended periodic location reporting.
+313. AT+XLCAPS: Configures advanced positioning settings.
+314. AT+CMOLRE: Manages location requests for mobile-originated sessions.
+315. AT+XCLA: Configures location area-specific parameters.
+316. AT+XCLAR: Reports location area-specific information.
+317. AT+CPBR: Reads phonebook entries.
+318. AT+CPBS: Selects phonebook storage location.
+319. AT+CPBW: Writes phonebook entries.
+320. AT+CPBF: Finds phonebook entries by matching text.
+321. AT+XCPBW: Configures extended phonebook write operations.
+322. AT+XCPBR: Configures extended phonebook read operations.
+323. AT+XBIP: Configures basic interoperable protocol settings.
+324. AT+XBIPCFG: Configures advanced settings for BIP operations.
+325. AT+XSTKPROM: Configures proactive SIM toolkit operations.
+326. AT+STKPROF: Configures SIM toolkit profile.
+327. AT+SATR: Sends SIM application toolkit response.
+328. AT+SATE: Enables or disables SIM application toolkit events.
+329. AT+STKCTRLIND: Configures SIM toolkit control indications.
+330. AT+SATD: Sends SIM application toolkit download commands.
+331. AT+XUSATS: Configures universal SIM application toolkit settings.
+332. AT+CUSATR: Reads universal SIM application toolkit responses.
+333. AT+CUSATW: Writes universal SIM application toolkit commands.
+334. AT+CUSATD: Downloads universal SIM application toolkit data.
+335. AT+CUSATA: Sends universal SIM application toolkit acknowledgment.
+336. AT+CUSATT: Tests universal SIM application toolkit configurations.
+337. AT+CUSATE: Enables or disables universal SIM application toolkit events.
+338. AT+XSTKCFG: Configures extended SIM toolkit parameters.
+339. AT+XATTMODE: Configures attachment modes for data services.
+340. AT+XSETCAUSE: Sets custom cause codes for network operations.
+341. AT+XSPEECHINFO: Reports speech-related information.
+342. AT+XUCCI: Manages universal client configuration information.
+343. AT@NVM: Configures or queries non-volatile memory settings.
+344. AT+CGPIAF: Configures PDP (Packet Data Protocol) address and format.
+345. AT+XSDT: Configures software-defined timing settings.
+346. AT+XRFCBT: Configures RF (Radio Frequency) calibration and testing.
+347. AT+XRFTASAR: Configures RF Tuning and Sensitivity Analysis Reporting.
+348. AT+XRFTASARENABLE: Enables RF Tuning and Sensitivity Analysis.
+349. AT+XTLSCERT: Configures TLS certificate management.
+350. AT+XTCPFLTR: Configures TCP filtering rules.
+351. AT+CSNS: Configures single number service settings.
+352. AT+XCAB: Configures carrier aggregation band settings.
+353. AT+XLEC: Configures line echo cancellation settings.
+354. AT+XIMEDIA: Manages IMS (IP Multimedia Subsystem) media settings.
+355. AT+XITBMS: Configures ITBMS (Integrated Traffic and Bandwidth Management System).
+356. AT+XCCINFO: Reports carrier component information.
+357. AT+RSRP: Reports Reference Signal Received Power.
+358. AT+RSRQ: Reports Reference Signal Received Quality.
+359. AT+RSCP: Reports Received Signal Code Power.
+360. AT+ECNO: Reports Ec/No (energy per chip over noise) ratio.
+361. AT+XNVMCFG: Configures NVRAM settings.
+362. AT+XMTU: Configures Maximum Transmission Unit settings.
+363. AT+CSQ: Reports signal quality.
+364. AT+CGSN: Queries the modem's IMEI (International Mobile Equipment Identity).
+365. AT+GSN: Retrieves the device serial number.
+366. AT+CFSN: Retrieves the full serial number of the device.
+367. AT+GFSN: Retrieves firmware-specific serial number information.
+368. AT+CGMR: Queries the current firmware version.
+369. AT+GMR: Retrieves the general modem revision information.
+370. AT+FMR: Retrieves factory-specific modem revision information.
+371. AT+GMM: Queries the modem model.
+372. AT+CGMM: Retrieves the detailed modem model information.
+373. AT+FMM: Retrieves firmware-specific modem model information.
+374. AT+CGMI: Queries the modem manufacturer.
+375. AT+GMI: Retrieves detailed manufacturer information.
+376. AT+MSTART: Starts modem-specific test modes.
+377. AT+TGPIO: Configures GPIO (General Purpose Input/Output) settings.
+378. AT+CBC: Reports battery charge status.
+379. AT+MMAD: Configures modem multimedia audio settings.
+380. AT+MTSM: Configures modem traffic shaping and management.
+381. AT+TGPO: Tests GPIO output settings.
+382. AT+GTFMODE: Configures modem functional modes.
+383. AT+GTWAKE: Configures wake-up settings for the modem.
+384. AT+MSMPD: Configures multimedia session management and playback.
+385. AT+GTSET: Configures modem general settings.
+386. AT+GTPBMMSR: Retrieves modem multimedia session reports.
+387. AT+GTPBMMSTAT: Reports multimedia status for playback buffer.
+388. AT+CLK26M: Configures 26 MHz clock settings for the modem.
+389. AT+BODYSAR: Configures body SAR (Specific Absorption Rate) parameters.
+390. AT+BODYSARST: Sets body SAR testing parameters.
+391. AT+BODYSARCLEAR: Clears body SAR configurations.
+392. AT+BODYSARON: Enables body SAR monitoring.
+393. AT+BODYSAREN: Enables or disables body SAR reporting.
+394. AT+BODYSAREX: Configures extended body SAR parameters.
+395. AT+BODYSARPROFILE: Configures body SAR profile settings.
+396. AT+BODYSARMODE: Configures body SAR operation modes.
+397. AT+GTANTTUNINGEN: Enables antenna tuning.
+398. AT+GTANTCTRLMODE: Configures antenna control modes.
+399. AT+GTANTTUNEMODE: Configures antenna tuning modes.
+400. AT+GTANTPROFILE: Configures antenna profile settings.
+401. AT+GTANTGPOCFG: Configures general-purpose output (GPO) settings for the antenna.
+402. AT+GTANTTUNERCFG: Configures antenna tuner settings.
+403. AT+GTANTMIPICFG: Configures MIPI (Mobile Industry Processor Interface) settings for the antenna.
+404. AT+GTCFGNMEA: Configures NMEA (National Marine Electronics Association) output settings for GPS.
+405. AT+GTCUSTPACKVER: Retrieves the version of the custom firmware package.
+406. AT+GTCURCAR: Queries the current carrier configuration.
+407. AT+GTMSELCAR: Manages manual selection of carriers.
+408. AT+GTASELCAR: Manages automatic selection of carriers.
+409. AT+GTFDCAR: Configures factory default carrier settings.
+410. AT+GTRSTRCAR: Restores default carrier configurations.
+411. AT+GTLOCKCAR: Locks the modem to a specific carrier.
+412. AT+GTTAS: Configures TAS (Transmit Antenna Switching) settings.
+413. AT+GTTASEN: Enables transmit antenna switching.
+414. AT+GTTASCFG: Configures detailed TAS parameters.
+415. AT+GTTASCLEAR: Clears current TAS configurations.
+416. AT+GTTASSTATE: Reports the current state of TAS.
+417. AT+GTRTSAR: Configures RTSAR (Receive Transmit Signal Adjustment Ratio) settings.
+418. AT+GTRTSAREN: Enables RTSAR monitoring.
+419. AT+GTRTSARCFG: Configures detailed RTSAR parameters.
+420. AT+GTRTSARCLEAR: Clears current RTSAR configurations.
+421. AT+GTRTSARSTATE: Reports the current state of RTSAR.
+422. AT+GTTASEX: Configures extended TAS settings.
+423. AT+GTTASPROFILE: Configures TAS profile settings.
+424. AT+GTTASALGO: Configures TAS algorithms.
+425. AT+GTFCCLOCKGEN: Configures factory clock generation parameters.
+426. AT+GTFCCLOCKVER: Retrieves the version of the factory clock firmware.
+427. AT+GTFCCLOCKCHECK: Performs a self-check on the factory clock.
+428. AT+GTFCCLOCKSTATE: Reports the current state of the factory clock.
+429. AT+GTFCCLOCKMODE: Configures the factory clock operation mode.
+430. AT+GTFCCLOCKMODELOCK: Locks the factory clock mode to a specific configuration.
+431. AT+GTFCCLOCKMODEUNLOCK: Unlocks the factory clock mode.
+432. AT+GTFCCLOCKSTATELOCK: Locks the factory clock state.
+433. AT+GTFCCLOCKSTATEUNLOCK: Unlocks the factory clock state.
+434. AT+GTERASEDYNNVM: Erases dynamic NVRAM (non-volatile memory) data.
+435. AT+GTDYNNVMERASECNT: Queries the erase count for dynamic NVRAM.
+436. AT+GTDEBUGEN: Enables or disables debugging features.
+437. AT+TPIN: Configures test PIN (Personal Identification Number) settings.
+438. AT+GTRFBK: Configures RF (Radio Frequency) feedback settings.
+439. AT+GTPMURC: Configures PMU (Power Management Unit) resource settings.
+440. AT+GTCAINFO: Queries carrier aggregation information.
+441. AT+GTSIMINIT: Configures or queries SIM initialization parameters.
+442. AT+GTABNORMALFLAG: Reports abnormal flags in system operations.
+443. AT+GTPCIEDB: Configures PCIe (Peripheral Component Interconnect Express) debug settings.
+444. AT+GTLG: Configures LG (Log Group) settings for diagnostic purposes.
+445. AT+GTTSAPN: Configures test APN (Access Point Name) settings.
+446. AT+GTDISESIM: Disables the eSIM (embedded SIM).
