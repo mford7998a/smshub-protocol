@@ -6,6 +6,8 @@ from serial.tools import list_ports
 import re
 from typing import Dict, Optional, List
 from config import config
+from modems.franklin_t9 import FranklinT9Modem
+from modems.novatel_551l import Novatel551LModem
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +28,10 @@ class ModemManager:
             processing_ports = set()
             
             ports = list_ports.comports()
-            # Only accept Qualcomm devices (Franklin T9)
+            # Accept both Qualcomm (Franklin T9) and Novatel devices
             current_ports = {p.device: p for p in ports if (
-                p.vid == 0x05C6 and  # Qualcomm VID
-                "Qualcomm HS-USB" in p.description  # Franklin T9 identifier
+                (p.vid == 0x05C6 and "Qualcomm HS-USB" in p.description) or  # Franklin T9
+                (p.vid == 0x1410 and "modem" in p.description.lower())  # Novatel 551L - look for any modem port
             )}
             
             logger.info(f"Found {len(current_ports)} potential modem ports")
@@ -236,6 +238,7 @@ class ModemManager:
     def _add_modem(self, port):
         """Initialize and add a new modem."""
         ser = None
+        modem = None
         try:
             logger.info(f"\n=== ADDING MODEM ON {port.device} ===")
             
@@ -244,172 +247,49 @@ class ModemManager:
                 logger.debug(f"Skipping diagnostic port: {port.device}")
                 return None
             
-            try:
-                # Try to open the port with a shorter timeout first
-                ser = serial.Serial(
-                    port=port.device,
-                    baudrate=115200,
-                    timeout=1,  # Increased from 0.5
-                    writeTimeout=1,  # Increased from 0.5
-                    exclusive=True
-                )
-                
-            except serial.SerialException as e:
-                if "in use" in str(e).lower() or "access is denied" in str(e).lower():
-                    logger.warning(f"Port {port.device} is busy or access denied, skipping")
-                else:
-                    logger.error(f"Failed to open port {port.device}: {e}")
-                return None
-            except Exception as e:
-                logger.error(f"Unexpected error opening port {port.device}: {e}")
-                return None
+            # Create appropriate modem instance based on device type
+            if port.vid == 0x1410 and "modem" in port.description.lower():  # Novatel Wireless modem
+                modem = Novatel551LModem(port.device)
+            else:  # Default to Franklin T9
+                modem = FranklinT9Modem(port.device)
             
-            # Initialize modem with expanded AT commands
-            commands = [
-                ('AT', 0.2),  # Increased delay
-                ('ATE0', 0.2),
-                ('AT+CMEE=2', 0.2),
-                ('AT+GSN', 0.2),
-                ('AT+CGSN', 0.2),
-                ('AT+CIMI', 0.2),
-                ('AT+CCID', 1.0),
-                ('AT^ICCID?', 1.0),
-                ('AT+QCCID', 1.0),
-                ('AT+ZGETICCID', 1.0),
-                ('AT$QCCID?', 1.0),
-                ('AT+ICCID', 1.0),
-                ('AT+CRSM=176,12258,0,0,10', 1.0),
-                ('AT+CREG?', 0.2),
-                ('AT+CNUM', 0.2),
-                ('AT+COPS?', 0.2),
-                ('AT+CSQ', 0.2),
-            ]
+            if not modem.initialize_modem():
+                return {
+                    'status': 'error',
+                    'error': 'Failed to initialize modem',
+                    'last_seen': time.time()
+                }
             
-            responses = {}
-            for cmd, delay in commands:
-                try:
-                    # Clear input buffer before each command
-                    ser.reset_input_buffer()
-                    ser.write(f"{cmd}\r\n".encode())
-                    time.sleep(delay)
-                    response = ser.read_all().decode('utf-8', errors='ignore')
-                    responses[cmd] = response
-                    logger.debug(f"Command {cmd} response: {response}")
-                except Exception as e:
-                    logger.error(f"Error sending command {cmd}: {e}")
-                    continue
-
-            # Parse responses with more lenient validation
-            imei = (self._parse_imei_response(responses['AT+GSN']) or 
-                   self._parse_imei_response(responses['AT+CGSN']))
-            
-            imsi = self._parse_at_response(responses['AT+CIMI'], '+CIMI')
-            
-            # Try all ICCID responses
-            iccid = None
-            for cmd in [
-                'AT+CCID',
-                'AT^ICCID?',
-                'AT+QCCID',
-                'AT+ZGETICCID',
-                'AT$QCCID?',
-                'AT+ICCID',
-                'AT+CRSM=176,12258,0,0,10'
-            ]:
-                if cmd in responses:
-                    iccid = self._parse_ccid_response(responses[cmd])
-                    if iccid:
-                        logger.info(f"✓ Got ICCID using {cmd}: {iccid}")
-                        break
-
-            # Check network registration with retries
-            reg_status = self._check_network_registration(ser)
-            
-            # Get phone number and carrier
-            phone = self._parse_at_response(responses['AT+CNUM'], '+CNUM')
-            carrier = self._parse_at_response(responses['AT+COPS?'], '+COPS')
-            signal_quality = self._parse_signal_quality(responses['AT+CSQ'])
-
-            # Determine modem status with more lenient checks
-            status = 'connected'
-            logger.info(f"\n=== MODEM STATUS CHECK for {port.device} ===")
-            logger.info(f"Initial status: {status}")
-            
-            # Check SIM (more lenient)
-            if iccid:
-                status = 'sim_ready'
-                logger.info(f"✓ SIM present - Status updated to: {status}")
-                
-                # Check network FIRST (using retry results)
-                if reg_status in ['registered', 'roaming']:
-                    status = 'registered'
-                    logger.info(f"✓ Network registered - Status updated to: {status}")
-                    
-                    # Only validate phone number if we're registered
-                    phone = self._parse_at_response(responses['AT+CNUM'], '+CNUM')
-                    logger.info(f"Raw phone number from network: {phone}")
-                    
-                    validated_phone = self._validate_phone_number(phone)
-                    if validated_phone:
-                        status = 'active'
-                        logger.info(f"✓ Valid phone number - Status updated to: {status}")
-                        phone = validated_phone  # Use validated number
-                    else:
-                        logger.warning(f"✗ Invalid/missing phone number: {phone}")
-                else:
-                    # If not registered, any phone number is invalid
-                    logger.warning(f"✗ Not registered on network. Status: {reg_status}")
-                    phone = None  # Clear any phone number since we're not registered
-            else:
-                logger.warning(f"✗ No valid ICCID found")
-                phone = None  # Clear any phone number since we don't have a valid SIM
-            
-            logger.info(f"=== FINAL STATUS: {status} ===\n")
-
-            # Create modem info with phone number only if properly registered
+            # Get modem info
             modem_info = {
-                'port': port.device,
-                'imei': imei or 'Unknown',
-                'iccid': iccid or 'Unknown',
-                'phone': phone or 'Unknown',
-                'status': status,
-                'last_seen': time.time(),
-                'manufacturer': port.manufacturer or 'Unknown',
-                'product': port.product or port.description or 'Unknown',
-                'vid': f"{port.vid:04X}" if port.vid else 'Unknown',
-                'pid': f"{port.pid:04X}" if port.pid else 'Unknown',
-                'carrier': carrier or 'Unknown',
-                'type': 'Franklin T9' if "Qualcomm HS-USB" in port.description else 'Generic GSM',
-                'operator': 'physic',
-                'signal_quality': signal_quality,
-                'network_status': reg_status,
-                'imsi': imsi or 'Unknown'
+                'status': 'initializing',
+                'imei': modem.imei,
+                'iccid': modem.iccid,
+                'phone': modem.phone,  # Add phone number to modem info
+                'network_status': modem.network_status,
+                'signal_quality': modem.signal_quality,
+                'operator': modem.operator,
+                'last_seen': time.time()
             }
             
-            # Store in local modems dict
-            self.modems[port.device] = modem_info
-            self.connected_modems.add(port.device)
-            
-            # Register with server if active
-            if self.server and status == 'active':
-                try:
-                    self.server.register_modem(port.device, modem_info)
-                    logger.info(f"✓ Registered modem with server: {port.device}")
-                except Exception as e:
-                    logger.error(f"Error registering modem with server: {e}")
+            # Update status based on requirements
+            if modem_info['iccid'] != 'Unknown' and modem_info['network_status'] in ['registered', 'roaming']:
+                modem_info['status'] = 'active'
+            else:
+                modem_info['status'] = 'inactive'
             
             return modem_info
-
-        except Exception as e:
-            logger.error(f"Error adding modem on port {port.device}: {e}")
-            return None
             
+        except Exception as e:
+            logger.error(f"Error adding modem: {e}")
+            return {
+                'status': 'error',
+                'error': str(e),
+                'last_seen': time.time()
+            }
         finally:
-            if ser and ser.is_open:
-                try:
-                    ser.close()
-                except Exception as e:
-                    logger.error(f"Error closing port {port.device}: {e}")
+            if modem:
+                modem.cleanup()
 
     def _parse_at_response(self, response: str, command: str) -> Optional[str]:
         """Parse AT command response to extract relevant information."""
