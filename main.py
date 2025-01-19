@@ -35,6 +35,8 @@ def main():
         server.smshub = smshub  # Link SMS Hub to server
         
         # Start server in a separate thread
+        logger.info(f"Server object: {server}")
+        logger.info(f"Server run method: {getattr(server, 'run', None)}")
         server_thread = threading.Thread(target=server.run, daemon=True)
         server_thread.start()
         logger.info(f"Server started on http://{server.host}:{server.port}")

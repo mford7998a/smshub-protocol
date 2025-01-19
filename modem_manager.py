@@ -241,25 +241,25 @@ class ModemManager:
         modem = None
         try:
             logger.info(f"\n=== ADDING MODEM ON {port.device} ===")
-            
+    
             # Skip if it's a diagnostic port
             if self._is_diagnostic_port(port):
                 logger.debug(f"Skipping diagnostic port: {port.device}")
                 return None
-            
+    
             # Create appropriate modem instance based on device type
             if port.vid == 0x1410 and "modem" in port.description.lower():  # Novatel Wireless modem
                 modem = Novatel551LModem(port.device)
             else:  # Default to Franklin T9
                 modem = FranklinT9Modem(port.device)
-            
+    
             if not modem.initialize_modem():
                 return {
                     'status': 'error',
                     'error': 'Failed to initialize modem',
                     'last_seen': time.time()
                 }
-            
+    
             # Get modem info
             modem_info = {
                 'status': 'initializing',
@@ -268,18 +268,18 @@ class ModemManager:
                 'phone': modem.phone,  # Add phone number to modem info
                 'network_status': modem.network_status,
                 'signal_quality': modem.signal_quality,
-                'operator': modem.operator,
+                'carrier': modem.operator,  # Use 'carrier' instead of 'operator'
                 'last_seen': time.time()
             }
-            
+    
             # Update status based on requirements
             if modem_info['iccid'] != 'Unknown' and modem_info['network_status'] in ['registered', 'roaming']:
                 modem_info['status'] = 'active'
             else:
                 modem_info['status'] = 'inactive'
-            
+    
             return modem_info
-            
+    
         except Exception as e:
             logger.error(f"Error adding modem: {e}")
             return {
@@ -295,14 +295,14 @@ class ModemManager:
         """Parse AT command response to extract relevant information."""
         if not response:
             return None
-            
+    
         try:
             lines = response.split('\r\n')
             for line in lines:
                 line = line.strip()
                 if not line:
                     continue
-                    
+    
                 if command in line:
                     # Extract the value after the command
                     parts = line.split(':')
@@ -323,24 +323,22 @@ class ModemManager:
                                 return number
                         # Handle COPS response format
                         elif command == '+COPS' and ',' in value:
-                            cops_parts = value.split(',')
-                            if len(cops_parts) >= 3:
-                                return cops_parts[2].strip('"')
+                            return value  # Return the raw response for COPS command
                         # For other commands, return the value if it looks valid
                         elif value and not any(x in value for x in ['ERROR', 'OK']):
                             return value
-                            
+    
                 # Handle case where response is just the value
                 elif line and not any(x in line for x in ['OK', 'ERROR', '+', 'AT']):
                     # For IMSI/ICCID, validate it's a number
                     if command in ['+CIMI', '+CCID'] and not line.isdigit():
                         continue
                     return line
-                    
+    
         except Exception as e:
             logger.error(f"Error parsing AT response for {command}: {e}")
             logger.error(f"Response was: {response}")
-            
+    
         return None
             
     def _parse_ccid_response(self, response: str) -> Optional[str]:
