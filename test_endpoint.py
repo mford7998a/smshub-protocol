@@ -36,8 +36,19 @@ def test_get_services():
         logger.info(f"Response content: {response.text}")
         
         response_data = response.json()
-        print("\nGET_SERVICES Response:")
-        print(json.dumps(response_data, indent=2))
+        
+        # Verify response format
+        assert 'countryList' in response_data, "Missing countryList in response"
+        assert isinstance(response_data['countryList'], list), "countryList should be an array"
+        
+        # Print active modem counts
+        for country in response_data['countryList']:
+            for operator, services in country['operatorMap'].items():
+                print(f"\nCountry: {country['country']}")
+                print(f"Operator: {operator}")
+                for service, count in services.items():
+                    print(f"  {service}: {count} modems")
+                    
         return response_data
     except Exception as e:
         logger.error(f"Error making request: {e}")

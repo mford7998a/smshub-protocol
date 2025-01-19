@@ -14,18 +14,24 @@ logger = logging.getLogger(__name__)
 class ModemManager:
     def __init__(self, server=None):
         """Initialize ModemManager."""
-        self.modems = {}  # port -> modem_info
+        self.modems = {}
         self.server = server
         self.running = False
         self.scan_thread = None
-        self.scan_interval = 10  # seconds
-        self.connected_modems = set()  # Track connected modems
+        self.scan_interval = 30  # seconds between scans
+        self.port_locks = {}  # Dictionary to store port locks
+        self.modem_states = {}  # Dictionary to store last known good states
         
+    def _get_port_lock(self, port_name):
+        """Get or create a lock for a port."""
+        if port_name not in self.port_locks:
+            self.port_locks[port_name] = threading.Lock()
+        return self.port_locks[port_name]
+
     def _scan_modems(self):
         """Scan for available modems."""
         try:
             logger.info("\n=== SCANNING FOR MODEMS ===")
-            processing_ports = set()
             
             ports = list_ports.comports()
             # Accept both Qualcomm (Franklin T9) and Novatel devices
@@ -41,18 +47,12 @@ class ModemManager:
             for port in disconnected:
                 logger.info(f"Removing disconnected modem: {port}")
                 self.modems.pop(port)
+                # Also remove from modem states
+                if port in self.modem_states:
+                    self.modem_states.pop(port)
             
             # Add or update modems
             for port_name, port in current_ports.items():
-                # Skip if port is already being processed
-                if port_name in processing_ports:
-                    continue
-                    
-                # Skip diagnostic and NMEA ports
-                if any(x in port.description.upper() for x in ['DIAGNOSTIC', 'NMEA', 'LOGGING']):
-                    logger.debug(f"Skipping diagnostic/NMEA port: {port_name}")
-                    continue
-                
                 # Only initialize new modems or update existing ones after scan_interval
                 current_time = time.time()
                 if (port_name not in self.modems or 
@@ -64,9 +64,6 @@ class ModemManager:
                         logger.info("Updating modem info...")
                     else:
                         logger.info("New modem detected")
-                    
-                    # Mark port as being processed
-                    processing_ports.add(port_name)
                     
                     try:
                         modem_info = self._add_modem(port)
@@ -87,13 +84,12 @@ class ModemManager:
                                 self.modems[port_name] = modem_info
                                 logger.info(f"Added/Updated modem: {port_name} (Status: {modem_info.get('status')})")
                             else:
-                                # Only add errored modem if it's a new error
-                                if port_name not in self.modems or self.modems[port_name].get('error') != modem_info.get('error'):
+                                # Only add errored modem if it's a new error and we don't have a last known good state
+                                if port_name not in self.modem_states:
                                     self.modems[port_name] = modem_info
                                     logger.error(f"Error initializing modem {port_name}: {modem_info.get('error')}")
-                    finally:
-                        # Remove port from processing set even if there was an error
-                        processing_ports.discard(port_name)
+                    except Exception as e:
+                        logger.error(f"Error processing modem {port_name}: {e}")
                 else:
                     logger.debug(f"Skipping {port_name} - Recently updated")
             
@@ -105,8 +101,7 @@ class ModemManager:
             logger.info("===============================\n")
                 
         except Exception as e:
-            logger.error(f"Error scanning modems: {e}")
-            logger.error("Full error details:", exc_info=True)
+            logger.error(f"Error during modem scan: {e}")
             
     def _is_diagnostic_port(self, port) -> bool:
         """Check if the port is a diagnostic port."""
@@ -236,60 +231,108 @@ class ModemManager:
         return 'not_registered'
 
     def _add_modem(self, port):
-        """Initialize and add a new modem."""
-        ser = None
+        """Add or update a modem."""
         modem = None
+        port_lock = self._get_port_lock(port.device)
+        
+        # Try to acquire the lock with a timeout
+        if not port_lock.acquire(timeout=5):  # 5 second timeout
+            logger.warning(f"Could not acquire lock for port {port.device} - keeping previous state")
+            # Return the last known good state if available
+            if port.device in self.modem_states:
+                return self.modem_states[port.device]
+            return None
+            
         try:
-            logger.info(f"\n=== ADDING MODEM ON {port.device} ===")
-    
+            logger.info(f"\n=== ADDING/UPDATING MODEM ON {port.device} ===")
+
             # Skip if it's a diagnostic port
             if self._is_diagnostic_port(port):
                 logger.debug(f"Skipping diagnostic port: {port.device}")
                 return None
-    
+
             # Create appropriate modem instance based on device type
             if port.vid == 0x1410 and "modem" in port.description.lower():  # Novatel Wireless modem
                 modem = Novatel551LModem(port.device)
             else:  # Default to Franklin T9
                 modem = FranklinT9Modem(port.device)
-    
+
             if not modem.initialize_modem():
+                logger.error("Failed to initialize modem")
+                # Return last known good state if available
+                if port.device in self.modem_states:
+                    return self.modem_states[port.device]
                 return {
                     'status': 'error',
                     'error': 'Failed to initialize modem',
                     'last_seen': time.time()
                 }
-    
+
             # Get modem info
             modem_info = {
                 'status': 'initializing',
                 'imei': modem.imei,
                 'iccid': modem.iccid,
-                'phone': modem.phone,  # Add phone number to modem info
+                'phone': modem.phone,
                 'network_status': modem.network_status,
                 'signal_quality': modem.signal_quality,
-                'carrier': modem.operator,  # Use 'carrier' instead of 'operator'
+                'carrier': modem.operator,
                 'last_seen': time.time()
             }
-    
-            # Update status based on requirements
-            if modem_info['iccid'] != 'Unknown' and modem_info['network_status'] in ['registered', 'roaming']:
+
+            # Log current state
+            logger.info("Modem Info:")
+            logger.info(f"  ICCID: {modem_info.get('iccid')}")
+            logger.info(f"  Network Status: {modem_info.get('network_status')}")
+            logger.info(f"  Phone: {modem_info.get('phone')}")
+
+            # Check requirements for active status
+            has_iccid = bool(modem_info.get('iccid') and modem_info['iccid'] != 'Unknown')
+            has_network = modem_info.get('network_status') in ['registered', 'roaming']
+            has_phone = bool(modem_info.get('phone') and modem_info['phone'] != 'Unknown')
+
+            logger.info("Requirements check:")
+            logger.info(f"  Has ICCID: {has_iccid}")
+            logger.info(f"  Has Network: {has_network}")
+            logger.info(f"  Has Phone: {has_phone}")
+
+            # Set status based on requirements
+            if has_iccid and has_network and has_phone:
                 modem_info['status'] = 'active'
+                logger.info("✓ Modem marked as ACTIVE")
+                # Store this as the last known good state
+                self.modem_states[port.device] = modem_info.copy()
+                # Update server's modem list if server exists
+                if self.server:
+                    self.server.update_modem(port.device, modem_info)
             else:
-                modem_info['status'] = 'inactive'
-    
+                # If we failed to meet requirements but have a last known good state, use that
+                if port.device in self.modem_states and self.modem_states[port.device].get('status') == 'active':
+                    logger.info("⚠ Using last known good state")
+                    return self.modem_states[port.device]
+                
+                modem_info['status'] = 'initializing'
+                logger.info("⚠ Modem status: INITIALIZING")
+                logger.info("Missing requirements:")
+                if not has_iccid: logger.info("  - Valid ICCID")
+                if not has_network: logger.info("  - Network Registration")
+                if not has_phone: logger.info("  - Valid Phone Number")
+                # Also update server with initializing status
+                if self.server:
+                    self.server.update_modem(port.device, modem_info)
+
             return modem_info
-    
+
         except Exception as e:
             logger.error(f"Error adding modem: {e}")
-            return {
-                'status': 'error',
-                'error': str(e),
-                'last_seen': time.time()
-            }
+            # Return last known good state if available
+            if port.device in self.modem_states:
+                return self.modem_states[port.device]
+            return {'status': 'error', 'error': str(e)}
         finally:
             if modem:
                 modem.cleanup()
+            port_lock.release()
 
     def _parse_at_response(self, response: str, command: str) -> Optional[str]:
         """Parse AT command response to extract relevant information."""

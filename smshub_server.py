@@ -86,6 +86,11 @@ class SmsHubServer:
             logger.error(f"Error initializing activation logger: {e}")
             self.activation_logger = None
 
+        # Initialize ModemManager with reference to self
+        from modem_manager import ModemManager
+        self.modem_manager = ModemManager(server=self)
+        self.modem_manager.start()  # Start scanning for modems
+
         # Initialize routes
         self._init_routes()
         self.load_total_earnings()
@@ -129,11 +134,57 @@ class SmsHubServer:
     def handle_get_services(self, data):
         """Handle request for available services."""
         try:
-            services = self.get_service_quantities()
-            return jsonify({
+            logger.info("\n=== GET_SERVICES Request ===")
+            logger.info("Current modems:")
+            for port, modem in self.modems.items():
+                logger.info(f"  {port}: {modem.get('status')} ({modem.get('iccid')})")
+            
+            # Count active modems
+            active_modems = len([m for m in self.modems.values() 
+                               if m.get('status') == 'active'])
+            
+            logger.info(f"Found {active_modems} active modems")
+            
+            # Build response
+            response = {
                 'status': 'SUCCESS',
-                'services': services
-            })
+                'countryList': [
+                    {
+                        'country': 'usaphysical',
+                        'operatorMap': {
+                            'any': {}
+                        }
+                    }
+                ]
+            }
+            
+            # Add all services with active modem count
+            services = response['countryList'][0]['operatorMap']['any']
+            for service in [
+                'aba', 'abb', 'abn', 'ac', 'acb', 'acc', 'acz', 'ada', 'aea', 'aeu',
+                'aez', 'afk', 'aft', 'afz', 'agk', 'agm', 'agy', 'ahe', 'aho', 'ahv',
+                'aig', 'aim', 'aiv', 'aiw', 'aiz', 'aja', 'ajj', 'ak', 'ako', 'alq',
+                'am', 'ama', 'amb', 'amj', 'aml', 'an', 'ane', 'anj', 'anp', 'aob',
+                'aoe', 'aoi', 'aoj', 'aok', 'aol', 'aom', 'aon', 'aor', 'aow', 'apb',
+                'ape', 'apk', 'apl', 'apm', 'app', 'apr', 'apt', 'aqf', 'aqg', 'aqh',
+                'aqt', 'are', 'arl', 'arw', 'asf', 'asn', 'asp', 'asq', 'atm', 'atr',
+                'atw', 'atx', 'atz', 'aub', 'auj', 'aul', 'aum', 'auz', 'ava', 'avc',
+                'bf', 'bl', 'bo', 'bs', 'bz', 'ck', 'cq', 'dc', 'dd', 'dg', 'dp', 'dq',
+                'dr', 'ds', 'ef', 'ep', 'et', 'ew', 'fb', 'fu', 'gf', 'gm', 'go', 'gp',
+                'gq', 'gr', 'gt', 'hb', 'ho', 'hw', 'ig', 'ij', 'im', 'iq', 'it', 'jg',
+                'jq', 'ka', 'kc', 'kf', 'ki', 'kt', 'lf', 'li', 'lo', 'ls', 'lx', 'ma',
+                'mb', 'mc', 'me', 'mj', 'mm', 'mo', 'mt', 'my', 'nc', 'nf', 'nv', 'nz',
+                'oe', 'oh', 'ot', 'oz', 'pf', 'pm', 'qf', 'qo', 'qq', 'qx', 'rc', 're',
+                'rl', 'rm', 'rt', 'rz', 'sf', 'sn', 'tg', 'th', 'ti', 'tn', 'tr', 'ts',
+                'tu', 'tv', 'tw', 'tx', 'ub', 'uk', 'un', 'uz', 'vi', 'vm', 'vp', 'vz',
+                'wa', 'wb', 'wc', 'wg', 'wr', 'wx', 'xv', 'xz', 'ya', 'yl', 'yw', 'yy',
+                'za', 'zh', 'zk', 'zm', 'zr', 'zy'
+            ]:
+                services[service] = active_modems
+            
+            logger.info(f"Response: {json.dumps(response, indent=2)}")
+            return jsonify(response)
+            
         except Exception as e:
             logger.error(f"Error handling get services request: {e}", exc_info=True)
             return jsonify({
@@ -176,17 +227,17 @@ class SmsHubServer:
         """Get current quantities for all services."""
         try:
             # Count active modems
-            active_modems = len([m for m in self.modems.values()
+            active_modems = len([m for m in self.modems.values() 
                                if m.get('status') == 'active'])
-
+            
             # Return quantities for enabled services
             return {
                 service: {
                     'quantity': active_modems,
                     'active': len([1 for num in self.active_numbers.values()
-                                  if num.get('service') == service]),
+                                 if num.get('service') == service]),
                     'completed': len([1 for nums in self.completed_activations.values()
-                                     if service in nums])
+                                    if service in nums])
                 }
                 for service, enabled in config.get('services', {}).items()
                 if enabled
@@ -194,3 +245,19 @@ class SmsHubServer:
         except Exception as e:
             logger.error(f"Error getting service quantities: {e}")
             return {}
+
+    def update_modem(self, port: str, modem_info: dict):
+        """Update modem information in the server."""
+        try:
+            logger.info(f"Updating server modem info for port {port}")
+            logger.info(f"New modem info: {json.dumps(modem_info, indent=2)}")
+            
+            # Create a copy of the modem info to avoid reference issues
+            self.modems[port] = modem_info.copy()
+            
+            # Log current active modems
+            active_count = len([m for m in self.modems.values() if m.get('status') == 'active'])
+            logger.info(f"Current active modem count: {active_count}")
+            
+        except Exception as e:
+            logger.error(f"Error updating modem info: {e}")
